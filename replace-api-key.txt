@@ -1,0 +1,5 @@
+#!/bin/sh
+# Replace any Anthropic API key pattern with a placeholder
+git filter-repo --force --replace-text - << EOF
+regex:sk-ant-api03-[a-zA-Z0-9]{48}=>ANTHROPIC_API_KEY_PLACEHOLDER
+EOF

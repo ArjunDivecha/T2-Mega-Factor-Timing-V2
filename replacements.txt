@@ -1,0 +1,1 @@
+regex:sk-ant-api03-[a-zA-Z0-9]{48}=ANTHROPIC_API_KEY_PLACEHOLDER
