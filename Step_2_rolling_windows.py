@@ -30,7 +30,6 @@ import numpy as np
 import pickle
 import os
 from datetime import datetime
-from scipy import stats
 
 # Define input and output files
 INPUT_FILE = "prepared_data.pkl"
@@ -65,60 +64,7 @@ def load_data(input_file):
     print(f"Successfully loaded data with {len(data['factor_timing'].columns)} factor timing portfolios")
     return data
 
-def filter_significant_portfolios(factor_timing, window_size=60, p_threshold=0.05):
-    """
-    Filter factor timing portfolios based on statistical significance
-    Keep only portfolios with significant t-statistics in the historical sample
-    
-    Args:
-        factor_timing (DataFrame): Factor timing portfolios
-        window_size (int): Size of the rolling window in months
-        p_threshold (float): P-value threshold for significance
-        
-    Returns:
-        DataFrame: Filtered factor timing portfolios
-    """
-    print(f"Filtering portfolios for statistical significance (p < {p_threshold})...")
-    
-    # Initial count
-    initial_count = factor_timing.shape[1]
-    
-    # Calculate t-statistics for each portfolio
-    t_stats = []
-    p_values = []
-    
-    for col in factor_timing.columns:
-        # Get the portfolio returns
-        returns = factor_timing[col].dropna()
-        
-        # Need at least window_size observations
-        if len(returns) < window_size:
-            t_stats.append(0)
-            p_values.append(1.0)
-            continue
-        
-        # Calculate t-statistic
-        t_stat, p_value = stats.ttest_1samp(returns, 0)
-        t_stats.append(t_stat)
-        p_values.append(p_value)
-    
-    # Create a DataFrame with results
-    stats_df = pd.DataFrame({
-        'portfolio': factor_timing.columns,
-        't_stat': t_stats,
-        'p_value': p_values
-    })
-    
-    # Filter portfolios based on p-value
-    significant_portfolios = stats_df[stats_df['p_value'] < p_threshold]['portfolio'].tolist()
-    
-    # Create a new DataFrame with only significant portfolios
-    filtered_factor_timing = factor_timing[significant_portfolios]
-    
-    final_count = filtered_factor_timing.shape[1]
-    print(f"Filtered portfolios from {initial_count} to {final_count} ({final_count/initial_count:.1%} kept)")
-    
-    return filtered_factor_timing
+# Filtering function removed - will be handled in the next step
 
 def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
     """
@@ -135,14 +81,9 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
     """
     print(f"Creating {train_size}-month training, {val_size}-month validation, and {test_size}-month testing windows...")
     
-    # Get factor timing portfolios
+    # Extract data
     factor_timing = data['factor_timing']
-    
-    # Get factor returns for performance evaluation
     factor_returns = data['factor_returns']
-    
-    # Filter factor timing portfolios based on statistical significance
-    filtered_factor_timing = filter_significant_portfolios(factor_timing, train_size)
     
     # Get the dates
     dates = factor_timing.index
@@ -164,17 +105,17 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
         # Get training window
         train_start = dates[i]
         train_end = dates[i + train_size - 1]
-        train_data = filtered_factor_timing.loc[train_start:train_end]
+        train_data = factor_timing.loc[train_start:train_end]
         
         # Get validation window (for determining optimal lambda)
         val_start = dates[i + train_size]
         val_end = dates[i + train_size + val_size - 1]
-        val_data = filtered_factor_timing.loc[val_start:val_end]
+        val_data = factor_timing.loc[val_start:val_end]
         
         # Get testing window (for final evaluation)
         test_start = dates[i + train_size + val_size]
         test_end = dates[i + train_size + val_size + test_size - 1]
-        test_data = filtered_factor_timing.loc[test_start:test_end]
+        test_data = factor_timing.loc[test_start:test_end]
         
         # Get evaluation window (factor returns for the test period)
         eval_data = factor_returns.loc[test_start:test_end]
@@ -210,7 +151,7 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
         'testing_windows': testing_windows,
         'evaluation_windows': eval_windows,
         'window_dates': window_dates,
-        'filtered_portfolios': filtered_factor_timing.columns.tolist()
+        'all_portfolios': factor_timing.columns.tolist()
     }
 
 def main():
@@ -240,7 +181,7 @@ def main():
     
     print(f"Total windows: {n_windows}")
     print(f"Time period covered: {first_window_date.strftime('%Y-%m')} to {last_window_date.strftime('%Y-%m')}")
-    print(f"Filtered portfolios: {len(windows['filtered_portfolios'])}")
+    print(f"Total portfolios: {len(windows['all_portfolios'])}")
     
     # Calculate data usage
     train_months = 60

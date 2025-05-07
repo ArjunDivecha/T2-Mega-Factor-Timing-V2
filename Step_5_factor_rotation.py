@@ -291,9 +291,10 @@ def main():
         return
 
     # Get the list of filtered portfolio names used in the optimization
-    filtered_portfolio_names = rolling_data.get('filtered_portfolios')
+    # Use 'all_portfolios' instead of 'filtered_portfolios' after Step 2 changes
+    filtered_portfolio_names = rolling_data.get('all_portfolios')
     if filtered_portfolio_names is None:
-        print("Error: 'filtered_portfolios' not found in rolling window data.")
+        print("Error: 'all_portfolios' not found in rolling window data.")
         return
         
     # Create a mapping from filtered portfolio names to their index
