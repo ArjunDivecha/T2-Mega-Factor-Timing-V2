@@ -24,6 +24,7 @@ import os
 import requests
 import json
 import time
+import dotenv
 
 # Set plot style
 plt.style.use('ggplot')
@@ -104,27 +105,85 @@ def analyze_conditioning_vars(sorted_weights):
     return cond_var_importance, non_zero_df
 
 def analyze_time_variation(sorted_weights):
-    """Analyze how conditioning variable importance changes over time"""
+    """Analyze time variation of conditioning variables importance"""
+    # Get date columns (all columns except Interaction, Factor, ConditioningVar, and AvgAbsWeight)
+    date_columns = sorted_weights.columns[3:-1]
+    
+    # Create a DataFrame to store time variation
+    time_df = pd.DataFrame(index=date_columns)
+    
     # Get top conditioning variables
     top_cond_vars = sorted_weights.groupby('ConditioningVar')['AvgAbsWeight'].mean().nlargest(10).index.tolist()
     
-    # For each time period, calculate the importance of each top conditioning variable
-    time_importance = {}
-    date_columns = sorted_weights.columns[3:-1]  # Skip Interaction, Factor, ConditioningVar, and AvgAbsWeight
+    # For each top conditioning variable, calculate average absolute weight for each date
+    for cond_var in top_cond_vars:
+        subset = sorted_weights[sorted_weights['ConditioningVar'] == cond_var]
+        for date in date_columns:
+            time_df.loc[date, cond_var] = subset[date].abs().mean()
     
-    for date in date_columns:
-        # Calculate sum of absolute weights for each conditioning variable in this time period
-        period_importance = {}
-        for cond_var in top_cond_vars:
-            subset = sorted_weights[sorted_weights['ConditioningVar'] == cond_var]
-            importance = subset[date].abs().sum()
-            period_importance[cond_var] = importance
-        time_importance[date] = period_importance
+    # Fill NaN values with 0
+    time_df = time_df.fillna(0)
     
-    # Convert to DataFrame for easier analysis
-    time_df = pd.DataFrame.from_dict(time_importance, orient='index')
+    # Convert index to datetime
+    time_df.index = pd.to_datetime(time_df.index)
     
-    return time_df, top_cond_vars
+    # Sort by date
+    time_df = time_df.sort_index()
+    
+    # Resample to quarterly frequency for better visualization
+    quarterly_df = time_df.resample('Q').mean()
+    
+    return quarterly_df, top_cond_vars
+
+def analyze_latest_period(sorted_weights, time_df):
+    """Analyze the latest time period data"""
+    # Get date columns (all columns except Interaction, Factor, ConditioningVar, and AvgAbsWeight)
+    date_columns = sorted_weights.columns[3:-1]
+    
+    # Get the latest date (last column before AvgAbsWeight)
+    latest_date = date_columns[-1]
+    print(f"\nAnalyzing latest period: {latest_date}")
+    
+    # Get top factors by weight in the latest period
+    factor_weights = {}
+    for factor in sorted_weights['Factor'].unique():
+        subset = sorted_weights[sorted_weights['Factor'] == factor]
+        factor_weights[factor] = subset[latest_date].abs().sum()
+    
+    top_factors_latest = pd.Series(factor_weights).sort_values(ascending=False).head(10)
+    print("\nTop 10 factors by total weight in latest period:")
+    print(top_factors_latest)
+    
+    # Get top conditioning variables in the latest period
+    cond_var_weights = {}
+    for cond_var in sorted_weights['ConditioningVar'].unique():
+        subset = sorted_weights[sorted_weights['ConditioningVar'] == cond_var]
+        cond_var_weights[cond_var] = subset[latest_date].abs().sum()
+    
+    top_cond_vars_latest = pd.Series(cond_var_weights).sort_values(ascending=False).head(10)
+    print("\nTop 10 conditioning variables by total weight in latest period:")
+    print(top_cond_vars_latest)
+    
+    # Get top factor-conditioning variable interactions in the latest period
+    interaction_weights = sorted_weights[['Factor', 'ConditioningVar', latest_date]].copy()
+    interaction_weights['AbsWeight'] = interaction_weights[latest_date].abs()
+    top_interactions_latest = interaction_weights.nlargest(10, 'AbsWeight')
+    print("\nTop 10 factor-conditioning variable interactions in latest period:")
+    print(top_interactions_latest[['Factor', 'ConditioningVar', 'AbsWeight']])
+    
+    # Get time series of top conditioning variables for the latest year
+    if isinstance(time_df.index, pd.DatetimeIndex):
+        latest_year = time_df.iloc[-4:] if len(time_df) >= 4 else time_df.iloc[-len(time_df):]
+        print("\nTrend of top conditioning variables in the latest year:")
+        print(latest_year)
+    
+    return {
+        'latest_date': latest_date,
+        'top_factors': top_factors_latest,
+        'top_cond_vars': top_cond_vars_latest,
+        'top_interactions': top_interactions_latest[['Factor', 'ConditioningVar', 'AbsWeight']],
+        'latest_year_trend': latest_year if 'latest_year' in locals() else None
+    }
 
 def plot_top_conditioning_vars(cond_var_importance, output_dir='.'):
     """Plot top conditioning variables by average absolute weight"""
@@ -225,8 +284,16 @@ def get_claude_analysis(analysis_data):
     """Get a detailed written analysis from Claude API"""
     print("\nGetting detailed analysis from Claude 3.5...")
     
+    # Load environment variables from .env file
+    dotenv.load_dotenv()
+    
     # API configuration
-    ANTHROPIC_API_KEY = "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"
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+    if not ANTHROPIC_API_KEY:
+        print("Error: ANTHROPIC_API_KEY not found in environment variables.")
+        print("Please create a .env file with your API key or set it as an environment variable.")
+        return None
+        
     ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
     
     # Prepare the prompt with analysis data
@@ -242,16 +309,25 @@ def get_claude_analysis(analysis_data):
     Factor-specific conditioning variables:
     {analysis_data['factor_specific']}
     
+    Latest period analysis (as of {analysis_data['latest_data']['latest_date']}):
+    
+    Top factors by weight in latest period:
+    {analysis_data['latest_data']['top_factors']}
+    
+    Top conditioning variables in latest period:
+    {analysis_data['latest_data']['top_cond_vars']}
+    
+    Top factor-conditioning variable interactions in latest period:
+    {analysis_data['latest_data']['top_interactions']}
+    
     Based on this data, please provide:
     1. A comprehensive analysis of which conditioning variables appear most important overall and why they might matter for factor timing
     2. An explanation of how different factors are influenced by different conditioning variables and what economic intuition might explain these relationships
     3. Insights about the time-varying nature of conditioning variable importance and what this means for investors
     4. Practical implications for factor timing strategies based on these findings
+    5. A specific analysis of the latest period data, highlighting which factors currently have high predictions and which conditioning variables are currently most important, including any notable shifts from historical patterns
     
-
-Please write in a professional, academic style suitable for a financial research paper.
-
-
+    Please write in a professional, academic style suitable for a financial research paper.
     """
     
     # Prepare the API request
@@ -344,6 +420,9 @@ def main():
         factor_specific_text += f"\nTop 5 conditioning variables for {factor}:\n"
         factor_specific_text += str(factor_specific_importance[factor].head(5)) + "\n"
     
+    # Analyze latest period data
+    latest_data = analyze_latest_period(sorted_weights, time_df)
+    
     # Create plots
     print("\nCreating plots...")
     plot_top_conditioning_vars(cond_var_importance, output_dir)
@@ -370,12 +449,26 @@ def main():
         # Top interactions
         sorted_weights.head(100)[['Interaction', 'Factor', 'ConditioningVar', 'AvgAbsWeight']].to_excel(
             writer, sheet_name='Top_Interactions', index=False)
+        
+        # Latest period data
+        latest_period_df = pd.DataFrame({
+            'Factor': latest_data['top_factors'].index,
+            'Weight': latest_data['top_factors'].values
+        })
+        latest_period_df.to_excel(writer, sheet_name='Latest_Period_Factors', index=False)
+        
+        latest_cond_vars_df = pd.DataFrame({
+            'ConditioningVar': latest_data['top_cond_vars'].index,
+            'Weight': latest_data['top_cond_vars'].values
+        })
+        latest_cond_vars_df.to_excel(writer, sheet_name='Latest_Period_CondVars', index=False)
     
     # Prepare data for Claude analysis
     analysis_data = {
         'top_by_weight': str(cond_var_importance.head(10)),
         'top_by_count': str(non_zero_df.head(10)),
-        'factor_specific': factor_specific_text
+        'factor_specific': factor_specific_text,
+        'latest_data': latest_data
     }
     
     # Get Claude analysis
