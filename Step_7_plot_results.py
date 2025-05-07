@@ -234,7 +234,7 @@ def plot_cumulative_returns(test_results, output_dir='.'):
                 pass
     
     # Check for 'benchmark_results' dictionary with 'test_returns' key
-    if not benchmark_data and 'benchmark_results' in test_results and 'test_returns' in test_results['benchmark_results']:
+    if not benchmark_data and 'benchmark_results' in test_results and test_results["benchmark_results"] is not None and "test_returns" in test_results["benchmark_results"]:
         bench_returns = test_results['benchmark_results']['test_returns']
         for idx in sorted(bench_returns.keys()):
             if idx in test_results['window_dates']:
@@ -351,7 +351,7 @@ def plot_drawdowns(test_results, output_dir='.'):
                 pass
     
     # Check for 'benchmark_results' dictionary with 'test_returns' key
-    if not benchmark_data and 'benchmark_results' in test_results and 'test_returns' in test_results['benchmark_results']:
+    if not benchmark_data and 'benchmark_results' in test_results and test_results["benchmark_results"] is not None and "test_returns" in test_results["benchmark_results"]:
         bench_returns = test_results['benchmark_results']['test_returns']
         for idx in sorted(bench_returns.keys()):
             if idx in test_results['window_dates']:

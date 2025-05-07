@@ -37,6 +37,7 @@ except ImportError as e:
 # Define input/output files
 ROLLING_WINDOWS_FILE = "rolling_windows.pkl"
 SHRINKAGE_RESULTS_FILE = "shrinkage_results.pkl"
+ROTATED_WEIGHTS_FILE = "rotated_optimal_weights.xlsx"
 OUTPUT_EXCEL_FILE = "factor_timing_results.xlsx"
 OUTPUT_PICKLE_FILE = "test_results.pkl"
 
@@ -171,55 +172,7 @@ def calculate_portfolio_turnover(weights_series):
     
     return np.mean(turnovers) * 100  # Convert to percentage
 
-def create_equal_weight_benchmark(shrinkage_results, rolling_data, window_indices):
-    """
-    Create equal-weight benchmark results
-    
-    Parameters:
-    -----------
-    shrinkage_results : dict
-        Results from shrinkage optimization
-    rolling_data : dict
-        Rolling windows data
-    window_indices : list
-        List of window indices
-        
-    Returns:
-    --------
-    benchmark_results : dict
-        Results of equal-weight benchmark
-    """
-    print("Creating equal-weight benchmark...")
-    
-    # Initialize results
-    benchmark_results = {
-        'portfolio_weights': {},
-        'test_returns': {}
-    }
-    
-    for i in window_indices:
-        # Skip if window not in shrinkage results
-        if i not in shrinkage_results['selected_portfolios']:
-            continue
-        
-        # Get selected portfolios
-        selected_columns = shrinkage_results['selected_portfolios'][i]
-        
-        # Create equal weights
-        num_portfolios = len(selected_columns)
-        eq_weights = np.ones(num_portfolios) / num_portfolios
-        
-        # Store weights
-        benchmark_results['portfolio_weights'][i] = eq_weights
-        
-        # Get test returns
-        # Check if i is a valid index for the testing_windows list
-        if 0 <= i < len(rolling_data['testing_windows']):
-            testing_window = rolling_data['testing_windows'][i][selected_columns]
-            eq_returns = np.dot(eq_weights, testing_window.values.T)
-            benchmark_results['test_returns'][i] = eq_returns
-    
-    return benchmark_results
+# Equal-weighted benchmark analysis has been removed as requested
 
 def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shrinkage=False):
     """
@@ -285,13 +238,9 @@ def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shr
             max_portfolios=max_portfolios
         )
     
-    # 2. Create equal-weight benchmark
-    print("\n===== PHASE 2: CREATING BENCHMARK =====")
-    benchmark_results = create_equal_weight_benchmark(
-        shrinkage_results,
-        rolling_data,
-        window_indices
-    )
+    # Equal-weighted benchmark analysis has been removed as requested
+    print("\n===== PHASE 2: SKIPPING BENCHMARK (REMOVED) =====")
+    benchmark_results = None
     
     # 3. Perform factor rotation
     print("\n===== PHASE 3: FACTOR ROTATION =====")
@@ -319,7 +268,7 @@ def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shr
 
 def process_factor_rotation(shrinkage_results):
     """
-    Process factor rotation (simplified from factor_rotation.py)
+    Process factor rotation using the rotated weights from rotated_optimal_weights.xlsx
     
     Parameters:
     -----------
@@ -332,6 +281,87 @@ def process_factor_rotation(shrinkage_results):
         Results of factor rotation analysis
     """
     print("Processing factor rotation...")
+    
+    # Get window indices
+    window_indices = list(shrinkage_results['portfolio_weights'].keys())
+    
+    # Initialize results
+    results = {
+        'window_indices': window_indices,
+        'factor_weights': {},
+        'long_only_weights': {},
+        'factor_names': []
+    }
+    
+    # Load rotated weights from Excel file
+    print(f"Loading rotated weights from {ROTATED_WEIGHTS_FILE}...")
+    if not os.path.exists(ROTATED_WEIGHTS_FILE):
+        print(f"Error: {ROTATED_WEIGHTS_FILE} not found. Please run Step_5_factor_rotation.py first.")
+        print("Falling back to internal rotation logic...")
+        return _process_factor_rotation_fallback(shrinkage_results)
+    
+    try:
+        # Load the rotated weights from Excel
+        rotated_df = pd.read_excel(ROTATED_WEIGHTS_FILE)
+        
+        # Extract factor names from the 'Factor' column
+        factor_names = rotated_df['Factor'].tolist()
+        results['factor_names'] = factor_names
+        print(f"Loaded {len(factor_names)} factors from {ROTATED_WEIGHTS_FILE}")
+        
+        # Create a mapping from date to window index
+        date_to_window = {}
+        for i in window_indices:
+            if i in shrinkage_results['window_dates'] and 'test_end' in shrinkage_results['window_dates'][i]:
+                test_end_date = shrinkage_results['window_dates'][i]['test_end']
+                date_str = test_end_date.strftime('%Y-%m-%d')
+                date_to_window[date_str] = i
+        
+        # Process each window
+        for date_str, window_idx in date_to_window.items():
+            if date_str in rotated_df.columns:
+                # Extract weights for this date
+                factor_weights_dict = {}
+                for j, factor in enumerate(factor_names):
+                    weight = rotated_df.loc[j, date_str]
+                    factor_weights_dict[factor] = weight
+                
+                # Convert to array
+                factor_weights_array = np.array([factor_weights_dict.get(factor, 0) for factor in factor_names])
+                
+                # Store factor weights
+                results['factor_weights'][window_idx] = factor_weights_array
+                
+                # Apply long-only constraint
+                long_only_weights = apply_long_only_constraint(factor_weights_dict, factor_names)
+                results['long_only_weights'][window_idx] = long_only_weights
+            else:
+                print(f"Warning: Date {date_str} not found in rotated weights file. Skipping window {window_idx}.")
+        
+        print(f"Successfully processed {len(results['factor_weights'])} windows with rotated weights")
+        return results
+        
+    except Exception as e:
+        print(f"Error loading rotated weights: {e}")
+        print("Falling back to internal rotation logic...")
+        return _process_factor_rotation_fallback(shrinkage_results)
+
+
+def _process_factor_rotation_fallback(shrinkage_results):
+    """
+    Fallback function for factor rotation if the rotated weights file is not available
+    
+    Parameters:
+    -----------
+    shrinkage_results : dict
+        Results from shrinkage optimization
+        
+    Returns:
+    --------
+    results : dict
+        Results of factor rotation analysis
+    """
+    print("Using fallback factor rotation logic...")
     
     # Get window indices
     window_indices = list(shrinkage_results['portfolio_weights'].keys())
@@ -495,7 +525,7 @@ def create_summary_dataframe(test_results):
         print("No data available for summary DataFrame")
         return pd.DataFrame()
 
-def plot_metrics(test_results, benchmark_results=None):
+def plot_metrics(test_results):
     """
     Create plots of key metrics
     
@@ -503,8 +533,6 @@ def plot_metrics(test_results, benchmark_results=None):
     -----------
     test_results : dict
         Complete test results
-    benchmark_results : dict, optional
-        Equal-weight benchmark results
         
     Returns:
     --------
@@ -629,85 +657,6 @@ def plot_metrics(test_results, benchmark_results=None):
         fig_sharpe.savefig('sharpe_plot.pdf')
         plt.close(fig_sharpe)
         
-        # Plot cumulative returns comparison if benchmark is available
-        if benchmark_results:
-            # Get strategy and benchmark returns
-            strategy_returns = {}
-            benchmark_returns = {}
-            
-            for idx in sorted(test_results['window_indices']):
-                if idx in test_results['test_returns'] and idx in benchmark_results['test_returns']:
-                    try:
-                        date_str = test_results['window_dates'][idx]['test_start']
-                        date = pd.to_datetime(date_str)
-                        
-                        strat_ret = test_results['test_returns'][idx]
-                        bench_ret = benchmark_results['test_returns'][idx]
-                        
-                        # Skip NaN values
-                        if not np.isnan(strat_ret).any() and not np.isnan(bench_ret).any():
-                            strategy_returns[date] = strat_ret
-                            benchmark_returns[date] = bench_ret
-                    except Exception as e:
-                        print(f"Error processing returns for window {idx}: {e}")
-            
-            if strategy_returns:
-                # Create DataFrame of returns
-                returns_df = pd.DataFrame({
-                    'Strategy': pd.Series(strategy_returns),
-                    'Equal-Weight': pd.Series(benchmark_returns)
-                })
-                
-                # Check if we have valid numeric data
-                if returns_df.shape[0] > 0 and not returns_df.isna().all().all():
-                    # Calculate cumulative returns
-                    cum_returns = (1 + returns_df).cumprod()
-                    
-                    # Plot cumulative returns
-                    fig_cumulative, ax_cumulative = plt.subplots(figsize=(12, 6))
-                    cum_returns.plot(ax=ax_cumulative)
-                    ax_cumulative.set_title('Cumulative Returns')
-                    ax_cumulative.set_xlabel('Date')
-                    ax_cumulative.set_ylabel('Growth of $1')
-                    ax_cumulative.grid(True, alpha=0.3)
-                    ax_cumulative.legend()
-                    figures['cumulative'] = fig_cumulative
-                    fig_cumulative.savefig('cumulative_plot.pdf')
-                    plt.close(fig_cumulative)
-                    
-                    # Calculate drawdowns
-                    drawdowns = pd.DataFrame()
-                    for col in cum_returns.columns:
-                        cum_ret = cum_returns[col]
-                        running_max = np.maximum.accumulate(cum_ret)
-                        drawdown = (cum_ret / running_max) - 1
-                        drawdowns[col] = drawdown
-                    
-                    # Plot drawdowns
-                    fig_drawdown, ax_drawdown = plt.subplots(figsize=(12, 6))
-                    drawdowns.plot(ax=ax_drawdown)
-                    ax_drawdown.set_title('Drawdowns')
-                    ax_drawdown.set_xlabel('Date')
-                    ax_drawdown.set_ylabel('Drawdown (%)')
-                    ax_drawdown.grid(True, alpha=0.3)
-                    ax_drawdown.legend()
-                    figures['drawdown'] = fig_drawdown
-                    fig_drawdown.savefig('drawdown_plot.pdf')
-                    plt.close(fig_drawdown)
-                else:
-                    print("Warning: No valid numeric data available for cumulative returns plot")
-                    # Create placeholder plots
-                    for plot_name, title in [('cumulative', 'Cumulative Returns'), 
-                                            ('drawdown', 'Drawdowns')]:
-                        fig, ax = plt.subplots(figsize=(12, 6))
-                        ax.text(0.5, 0.5, f"Insufficient data for {title.lower()} plot", 
-                              horizontalalignment='center', verticalalignment='center',
-                              transform=ax.transAxes, fontsize=14)
-                        ax.set_title(f'{title} (No Data)')
-                        figures[plot_name] = fig
-                        fig.savefig(f'{plot_name}_plot.pdf')
-                        plt.close(fig)
-        
         print(f"Successfully created {len(figures)} plots")
     except Exception as e:
         print(f"Error generating plots: {e}")
@@ -716,9 +665,7 @@ def plot_metrics(test_results, benchmark_results=None):
         
         # Create basic placeholder plots if an error occurred
         for plot_name, title in [('lambda', 'Optimal Lambda Evolution'), 
-                                ('sharpe', 'Sharpe Ratio Evolution'),
-                                ('cumulative', 'Cumulative Returns'), 
-                                ('drawdown', 'Drawdowns')]:
+                                ('sharpe', 'Sharpe Ratio Evolution')]:
             try:
                 fig, ax = plt.subplots(figsize=(10, 6))
                 ax.text(0.5, 0.5, f"Error generating {title.lower()} plot:\n{str(e)}", 
@@ -734,7 +681,7 @@ def plot_metrics(test_results, benchmark_results=None):
     # Return figures for later use
     return figures
 
-def export_test_results(test_results, rolling_data, benchmark_results=None):
+def export_test_results(test_results, rolling_data):
     """
     Export test results to Excel and pickle files
     
@@ -744,8 +691,6 @@ def export_test_results(test_results, rolling_data, benchmark_results=None):
         Complete test results
     rolling_data : dict
         Rolling windows data
-    benchmark_results : dict, optional
-        Equal-weight benchmark results
     """
     print(f"Exporting test results to {OUTPUT_EXCEL_FILE} and {OUTPUT_PICKLE_FILE}...")
     
@@ -811,26 +756,6 @@ def export_test_results(test_results, rolling_data, benchmark_results=None):
     strategy_turnover = calculate_portfolio_turnover(portfolio_weights_series)
     strategy_metrics['turnover'] = strategy_turnover
     
-    # Calculate benchmark metrics if available
-    print("Calculating benchmark metrics...")
-    benchmark_metrics = None
-    if benchmark_results:
-        benchmark_returns = []
-        for idx in windows:
-            if idx in benchmark_results['test_returns']:
-                benchmark_returns.append(benchmark_results['test_returns'][idx])
-        
-        all_benchmark_returns = np.concatenate(benchmark_returns) if benchmark_returns else np.array([])
-        print(f"Found {len(all_benchmark_returns)} benchmark return data points")
-        
-        benchmark_metrics = calculate_performance_metrics(all_benchmark_returns)
-        
-        # Calculate benchmark turnover
-        benchmark_weights_series = [benchmark_results['portfolio_weights'][idx] for idx in windows 
-                                  if idx in benchmark_results['portfolio_weights']]
-        benchmark_turnover = calculate_portfolio_turnover(benchmark_weights_series)
-        benchmark_metrics['turnover'] = benchmark_turnover
-    
     # Create performance summary DataFrame
     print("Creating performance summary DataFrame...")
     performance_data = {
@@ -846,22 +771,12 @@ def export_test_results(test_results, rolling_data, benchmark_results=None):
         ]
     }
     
-    if benchmark_metrics:
-        performance_data['Equal-Weight'] = [
-            f"{benchmark_metrics['annualized_return']:.2f}",
-            f"{benchmark_metrics['annualized_vol']:.2f}",
-            f"{benchmark_metrics['sharpe_ratio']:.2f}",
-            f"{benchmark_metrics['max_drawdown']:.2f}",
-            f"{benchmark_metrics['win_rate']:.2f}",
-            f"{benchmark_metrics['turnover']:.2f}"
-        ]
-    
     performance_df = pd.DataFrame(performance_data)
     
     # Create figures for saving separately (not embedding in Excel)
     print("Creating visualizations and saving as separate files...")
     try:
-        figures = plot_metrics(test_results, benchmark_results)
+        figures = plot_metrics(test_results)
         print(f"Created {len(figures)} figures")
         
         # Save image files separately
@@ -972,7 +887,7 @@ def main():
     )
     
     # Export results
-    export_test_results(test_results, rolling_data, test_results['benchmark_results'])
+    export_test_results(test_results, rolling_data)
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -51,17 +51,41 @@ def load_pickle(file_path, description):
 
 def extract_original_factor(portfolio_name):
     """Extracts the original factor name from the timing portfolio name."""
-    # Assumes format: FactorName_PredictorName
-    # Handles potential complex factor names that might contain underscores
-    # This is a heuristic and might need refinement based on actual predictor names
+    # For portfolio names like "10Yr Bond 12_CS_US 10Yr" we want to extract "10Yr Bond 12_CS"
+    
+    # Simple approach: Look for _CS_ or _TS_ pattern and keep everything before it and the CS/TS part
+    if '_CS_' in portfolio_name:
+        base_name, rest = portfolio_name.split('_CS_', 1)
+        return f"{base_name}_CS"
+    elif '_TS_' in portfolio_name:
+        base_name, rest = portfolio_name.split('_TS_', 1)
+        return f"{base_name}_TS"
+    
+    # Alternative pattern: Factor_CS or Factor_TS at the beginning
     parts = portfolio_name.split('_')
-    # Find the last part that looks like a predictor (e.g., contains MTR or is a known macro var)
-    # A simpler approach for now: assume the predictor is the last part.
-    if len(parts) > 1:
-        return '_'.join(parts[:-1])
-    else:
-        print(f"Warning: Could not parse original factor from '{portfolio_name}'. Returning full name.")
-        return portfolio_name # Return original if parsing fails
+    if len(parts) >= 2 and parts[1] in ['CS', 'TS']:
+        return f"{parts[0]}_{parts[1]}"
+    
+    # Check for CS or TS in any position
+    for i, part in enumerate(parts[:-1]):
+        if part in ['CS', 'TS']:
+            return '_'.join(parts[:i+1])
+    
+    # If we have a name ending with _CS or _TS, use that
+    if portfolio_name.endswith('_CS') or portfolio_name.endswith('_TS'):
+        return portfolio_name
+    
+    # Last resort: try to identify if the name contains CS or TS anywhere
+    if '_CS' in portfolio_name:
+        index = portfolio_name.find('_CS')
+        return portfolio_name[:index+3]  # Include the _CS
+    elif '_TS' in portfolio_name:
+        index = portfolio_name.find('_TS')
+        return portfolio_name[:index+3]  # Include the _TS
+    
+    # If all else fails, return the portfolio name as is
+    print(f"Warning: Could not parse CS/TS suffix from '{portfolio_name}'. Returning name without suffix.")
+    return portfolio_name
 
 def extract_factor_names(portfolio_names):
     """
@@ -319,6 +343,11 @@ def main():
 
     num_windows = len(shrinkage_results['window_indices'])
     print(f"Processing {num_windows} windows...")
+    
+    # Print a few sample portfolio names for debugging
+    print("Sample portfolio names:")
+    for name in filtered_portfolio_names[:5]:
+        print(f"  {name} -> {extract_original_factor(name)}")
 
     for i in shrinkage_results['window_indices']:
         if i not in optimal_weights_timing:
@@ -343,13 +372,17 @@ def main():
         temp_rotated_weights = defaultdict(float)
         for portfolio_name in filtered_portfolio_names:
             original_factor = extract_original_factor(portfolio_name)
-            if original_factor in original_factors:
-                portfolio_idx = portfolio_name_to_index.get(portfolio_name)
-                if portfolio_idx is not None:
-                    temp_rotated_weights[original_factor] += current_weights[portfolio_idx]
-                else:
-                     print(f"Warning: Index for portfolio '{portfolio_name}' not found in window {i}. Skipping.")
-            # else: portfolio might be based on a factor not in the final list? Or parsing error.
+            portfolio_idx = portfolio_name_to_index.get(portfolio_name)
+            if portfolio_idx is not None:
+                temp_rotated_weights[original_factor] += current_weights[portfolio_idx]
+            else:
+                print(f"Warning: Index for portfolio '{portfolio_name}' not found in window {i}. Skipping.")
+        
+        # Add validation to check if we're capturing all weights
+        total_original_weight = sum(abs(w) for w in temp_rotated_weights.values())
+        total_portfolio_weight = sum(abs(w) for w in current_weights)
+        if abs(total_original_weight - total_portfolio_weight) > 0.01:
+            print(f"Warning: Weight mismatch in window {i}. Original: {total_original_weight:.4f}, Portfolio: {total_portfolio_weight:.4f}")
 
         # Store aggregated weights for the date
         for factor, weight in temp_rotated_weights.items():
@@ -365,6 +398,28 @@ def main():
 
     # Ensure columns are sorted by date
     rotated_weights_df = rotated_weights_df.reindex(sorted(rotated_weights_df.columns, key=pd.to_datetime), axis=1)
+    
+    # Check for any extreme values
+    if not rotated_weights_df.empty:
+        max_weight = rotated_weights_df.max().max()
+        min_weight = rotated_weights_df.min().min()
+        print(f"Weight range: {min_weight:.4f} to {max_weight:.4f}")
+        
+        # Check if weights sum to approximately 1 for each date
+        weight_sums = rotated_weights_df.sum()
+        print(f"Weight sum range: {weight_sums.min():.4f} to {weight_sums.max():.4f}")
+        
+        # Normalize weights if they don't sum to 1
+        if abs(weight_sums.mean() - 1.0) > 0.1:
+            print("Normalizing weights to sum to 1 for each date...")
+            for col in rotated_weights_df.columns:
+                col_sum = rotated_weights_df[col].sum()
+                if col_sum != 0:
+                    rotated_weights_df[col] = rotated_weights_df[col] / col_sum
+            
+            # Verify normalization
+            weight_sums_after = rotated_weights_df.sum()
+            print(f"Weight sum range after normalization: {weight_sums_after.min():.4f} to {weight_sums_after.max():.4f}")
 
     # Add factor names as a column from the index
     rotated_weights_df.index.name = 'Factor'
