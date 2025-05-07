@@ -60,7 +60,7 @@ The complete workflow consists of the following steps:
    ```
    python run_factor_timing_test.py [options]
    ```
-   Executes the full pipeline end-to-end, calculating comprehensive performance metrics, saving detailed results to `test_results.pkl` and `factor_timing_results.xlsx`.
+   Executes the full pipeline end-to-end, calculating comprehensive performance metrics, saving detailed results to `test_results.pkl` and `factor_timing_results.xlsx`. Can use existing shrinkage results without rerunning optimization.
 
 8. **Generate Plots**:
    ```
@@ -89,6 +89,14 @@ All scripts support the following parameters:
 --max_windows N            Maximum number of windows to process (default: 5, 0 for all windows)
 --max_portfolios N         Maximum number of portfolios to analyze (default: 2000)
 --find_2010_window         Find and process window around 2010
+```
+
+Additionally, `run_factor_timing_test.py` supports these parameters:
+
+```
+--run_shrinkage            Force rerunning shrinkage optimization even if results exist
+--export_excel             Export results to Excel (default: True if not already exists)
+--export_plots             Export plots to PDF files (default: True)
 ```
 
 **Note**: The parameters `--window_indices`, `--start_date/--end_date`, and `--find_2010_window` are mutually exclusive. If none are provided, the script will process up to `max_windows` most recent windows.
@@ -321,3 +329,70 @@ The implementation follows a multi-phase approach:
 ### Phase 5: Performance Evaluation
 - Scripts: `run_factor_timing_test.py` and `plot_factor_results.py`
 - Calculates performance metrics and generates visualizations
+
+## Running the Complete Pipeline Step by Step
+
+To run the entire factor timing pipeline for all available windows, follow these steps:
+
+### 1. Data Preparation
+```
+python factor_timing_data_prep.py
+```
+This loads the raw factor and conditioning variable data and prepares factor timing portfolios.
+
+### 2. Generate Rolling Windows
+```
+python factor_timing_rolling_windows.py
+```
+This creates rolling windows for training, validation, and testing periods.
+
+### 3. Run Shrinkage Optimization for All Windows
+```
+python factor_timing_shrinkage.py --max_windows 0
+```
+The `--max_windows 0` parameter processes all available windows. This is the most time-consuming step.
+
+### 4. Extract Portfolio Weights
+```
+python extract_weights.py
+```
+This extracts the optimal weights from the shrinkage results.
+
+### 5. Perform Factor Rotation
+```
+python factor_rotation.py
+```
+This rotates portfolio weights into factor weights.
+
+### 6. Generate Performance Metrics and Visualizations
+```
+python run_factor_timing_test.py --max_windows 0
+```
+This processes all windows and generates performance metrics. The script will automatically use the existing shrinkage results without rerunning the optimization.
+
+If you want to force rerunning the shrinkage optimization:
+```
+python run_factor_timing_test.py --max_windows 0 --run_shrinkage
+```
+
+### 7. Generate Additional Visualizations
+```
+python plot_factor_results.py
+```
+This creates additional visualizations from the test results.
+
+## Recent Modifications
+
+### Enhanced Mean Returns Impact
+
+The `factor_timing_shrinkage.py` script has been modified to scale the mean returns vector by a factor of 10.0 in the `optimal_portfolio_weights` function. This emphasizes the impact of expected returns during portfolio optimization:
+
+```python
+# Adjust the impact of the mean returns vector
+return_multiplier = 10.0  # Adjust this value to control emphasis
+mu_hat = mu_hat * return_multiplier
+```
+
+### Optimized Performance Analysis
+
+The `run_factor_timing_test.py` script has been modified to skip rerunning the time-consuming shrinkage optimization step when not needed. It now checks if the shrinkage results file exists and uses it directly unless the `--run_shrinkage` flag is specified.

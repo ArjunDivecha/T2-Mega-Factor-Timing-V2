@@ -1,15 +1,33 @@
 """
-# Run Factor Timing Test
+# Factor Timing Complete Pipeline
 # 
-# INPUT FILES:
-# - rolling_windows.pkl: Dictionary containing all rolling windows data
+# This script serves as a unified pipeline for the entire factor timing workflow.
+# It can execute all steps in sequence or start from any intermediate point
+# in the pipeline, producing identical results to running individual components.
+#
+# WORKFLOW COMPONENTS:
+# 1. Data Preparation: Process raw Excel data (factor_timing_data_prep.py)
+# 2. Rolling Windows: Create rolling train/validate/test windows (factor_timing_rolling_windows.py)
+# 3. Shrinkage Optimization: Apply L-W shrinkage with fixed lambda (factor_timing_shrinkage.py)
+# 4. Weight Extraction: Extract portfolio weights (extract_weights.py)
+# 5. Factor Rotation: Convert portfolio weights to factor weights (factor_rotation.py)
+# 6. Performance Analysis: Calculate metrics and visualize results
+#
+# INPUT FILES (depending on starting point):
+# - T2 Mega Factor Conditioning Variables.xlsx: Raw data for step 1
+# - prepared_data.pkl: Output from step 1, input for step 2
+# - rolling_windows.pkl: Output from step 2, input for step 3
+# - shrinkage_results.pkl: Output from step 3, input for steps 4 and 5
 #
 # OUTPUT FILES:
-# - factor_weights.xlsx: Summary Excel file with factor weights and performance 
-# - test_results.pkl: Complete results of the test
-#
-# This script provides an end-to-end test of the factor timing methodology
-# for a specific date range, producing a comprehensive summary report.
+# - prepared_data.pkl: Processed factor returns and timing portfolios
+# - rolling_windows.pkl: Train/validate/test split windows
+# - shrinkage_results.pkl: Optimization results with portfolio weights
+# - unrotated_optimal_weights.xlsx: Extracted portfolio weights
+# - rotated_optimal_weights.xlsx: Weights converted to factor form
+# - test_results.pkl: Complete performance results
+# - factor_timing_results.xlsx: Excel summary of all results
+# - Various PDF visualizations
 """
 
 import pandas as pd
@@ -22,6 +40,8 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import sys
 import traceback
+import importlib.util
+import subprocess
 from factor_timing_params import add_common_args, parse_window_indices
 
 # Import functions from other modules
@@ -35,10 +55,216 @@ except ImportError as e:
     sys.exit(1)
 
 # Define input/output files
+EXCEL_INPUT_FILE = "T2 Mega Factor Conditioning Variables.xlsx"
+PREPARED_DATA_FILE = "prepared_data.pkl"
 ROLLING_WINDOWS_FILE = "rolling_windows.pkl"
 SHRINKAGE_RESULTS_FILE = "shrinkage_results.pkl"
+UNROTATED_WEIGHTS_FILE = "unrotated_optimal_weights.xlsx"
+ROTATED_WEIGHTS_FILE = "rotated_optimal_weights.xlsx"
+TEST_RESULTS_FILE = "test_results.pkl"
 OUTPUT_EXCEL_FILE = "factor_timing_results.xlsx"
-OUTPUT_PICKLE_FILE = "test_results.pkl"
+
+def import_module_from_file(module_name, file_path):
+    """
+    Import a module from a file path
+    
+    Args:
+        module_name (str): Name to give the imported module
+        file_path (str): Path to the Python file
+        
+    Returns:
+        module: The imported module object, or None if import fails
+    """
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception as e:
+        print(f"Error importing module from {file_path}: {e}")
+        return None
+
+def run_data_preparation(force=False):
+    """
+    Run the data preparation step (Phase 1)
+    
+    Args:
+        force (bool): Whether to regenerate output even if it exists
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if os.path.exists(PREPARED_DATA_FILE) and not force:
+        print(f"Prepared data file {PREPARED_DATA_FILE} already exists. Use --force to regenerate.")
+        return False
+    
+    print("\n===== PHASE 1: DATA PREPARATION =====")
+    try:
+        # Import the module
+        data_prep = import_module_from_file("factor_timing_data_prep", "factor_timing_data_prep.py")
+        if not data_prep:
+            print("Failed to import factor_timing_data_prep.py")
+            return False
+        
+        # Execute the main function
+        data_prep.main()
+        return True
+    except Exception as e:
+        print(f"Error running data preparation: {e}")
+        traceback.print_exc()
+        return False
+
+def run_rolling_windows(force=False):
+    """
+    Run the rolling windows generation step (Phase 2)
+    
+    Args:
+        force (bool): Whether to regenerate output even if it exists
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not os.path.exists(PREPARED_DATA_FILE):
+        print(f"Error: {PREPARED_DATA_FILE} not found. Run data preparation first.")
+        return False
+        
+    if os.path.exists(ROLLING_WINDOWS_FILE) and not force:
+        print(f"Rolling windows file {ROLLING_WINDOWS_FILE} already exists. Use --force to regenerate.")
+        return False
+    
+    print("\n===== PHASE 2: ROLLING WINDOWS GENERATION =====")
+    try:
+        # Import the module
+        rolling_windows = import_module_from_file("factor_timing_rolling_windows", "factor_timing_rolling_windows.py")
+        if not rolling_windows:
+            print("Failed to import factor_timing_rolling_windows.py")
+            return False
+        
+        # Execute the main function
+        rolling_windows.main()
+        return True
+    except Exception as e:
+        print(f"Error running rolling windows generation: {e}")
+        traceback.print_exc()
+        return False
+
+def run_shrinkage_optimization(window_indices=None, max_windows=None, force=False):
+    """
+    Run the shrinkage optimization step (Phase 3)
+    
+    Args:
+        window_indices (str): Comma-separated window indices to process
+        max_windows (int): Maximum number of windows to process
+        force (bool): Whether to regenerate output even if it exists
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not os.path.exists(ROLLING_WINDOWS_FILE):
+        print(f"Error: {ROLLING_WINDOWS_FILE} not found. Run rolling windows generation first.")
+        return False
+        
+    if os.path.exists(SHRINKAGE_RESULTS_FILE) and not force:
+        print(f"Shrinkage results file {SHRINKAGE_RESULTS_FILE} already exists. Use --force to regenerate.")
+        return False
+    
+    print("\n===== PHASE 3: SHRINKAGE OPTIMIZATION =====")
+    try:
+        # Prepare command line arguments
+        cmd = ["python", "factor_timing_shrinkage.py"]
+        
+        if window_indices:
+            cmd.extend(["--window_indices", window_indices])
+        
+        if max_windows:
+            cmd.extend(["--max_windows", str(max_windows)])
+        
+        if force:
+            cmd.append("--force")
+        
+        # Execute the command
+        subprocess.run(cmd, check=True)
+        return True
+    except Exception as e:
+        print(f"Error running shrinkage optimization: {e}")
+        traceback.print_exc()
+        return False
+
+def run_extract_weights(force=False):
+    """
+    Run the weight extraction step (Phase 4)
+    
+    Args:
+        force (bool): Whether to regenerate output even if it exists
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not os.path.exists(SHRINKAGE_RESULTS_FILE):
+        print(f"Error: {SHRINKAGE_RESULTS_FILE} not found. Run shrinkage optimization first.")
+        return False
+        
+    if os.path.exists(UNROTATED_WEIGHTS_FILE) and not force:
+        print(f"Unrotated weights file {UNROTATED_WEIGHTS_FILE} already exists. Use --force to regenerate.")
+        return False
+    
+    print("\n===== PHASE 4: WEIGHT EXTRACTION =====")
+    try:
+        # Import the module
+        extract_weights = import_module_from_file("extract_weights", "extract_weights.py")
+        if not extract_weights:
+            print("Failed to import extract_weights.py")
+            return False
+        
+        # Execute the main function if it exists
+        if hasattr(extract_weights, 'main'):
+            extract_weights.main()
+        else:
+            # Otherwise run the whole script
+            subprocess.run(["python", "extract_weights.py"], check=True)
+        return True
+    except Exception as e:
+        print(f"Error running weight extraction: {e}")
+        traceback.print_exc()
+        return False
+
+def run_factor_rotation(force=False):
+    """
+    Run the factor rotation step (Phase 5)
+    
+    Args:
+        force (bool): Whether to regenerate output even if it exists
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not os.path.exists(SHRINKAGE_RESULTS_FILE):
+        print(f"Error: {SHRINKAGE_RESULTS_FILE} not found. Run shrinkage optimization first.")
+        return False
+        
+    if os.path.exists(ROTATED_WEIGHTS_FILE) and not force:
+        print(f"Rotated weights file {ROTATED_WEIGHTS_FILE} already exists. Use --force to regenerate.")
+        return False
+    
+    print("\n===== PHASE 5: FACTOR ROTATION =====")
+    try:
+        # Import the module
+        factor_rotation = import_module_from_file("factor_rotation", "factor_rotation.py")
+        if not factor_rotation:
+            print("Failed to import factor_rotation.py")
+            return False
+        
+        # Execute the main function if it exists
+        if hasattr(factor_rotation, 'main'):
+            factor_rotation.main()
+        else:
+            # Otherwise run the whole script
+            subprocess.run(["python", "factor_rotation.py"], check=True)
+        return True
+    except Exception as e:
+        print(f"Error running factor rotation: {e}")
+        traceback.print_exc()
+        return False
 
 def load_rolling_windows():
     """Load the rolling windows data"""
@@ -221,7 +447,7 @@ def create_equal_weight_benchmark(shrinkage_results, rolling_data, window_indice
     
     return benchmark_results
 
-def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shrinkage=False):
+def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000):
     """
     Run the entire test pipeline for specified windows
     
@@ -233,8 +459,6 @@ def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shr
         List of window indices to process
     max_portfolios : int
         Maximum number of portfolios to include
-    run_shrinkage : bool
-        Whether to run shrinkage optimization even if results file exists
         
     Returns:
     --------
@@ -244,46 +468,13 @@ def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shr
     print(f"Running complete test pipeline for {len(window_indices)} windows...")
     start_time = time.time()
     
-    # 1. Check if shrinkage results exist or if we need to rerun
+    # 1. Run shrinkage analysis
     print("\n===== PHASE 1: SHRINKAGE OPTIMIZATION =====")
-    if os.path.exists(SHRINKAGE_RESULTS_FILE) and not run_shrinkage:
-        print(f"Loading existing shrinkage results from {SHRINKAGE_RESULTS_FILE}...")
-        try:
-            with open(SHRINKAGE_RESULTS_FILE, 'rb') as f:
-                shrinkage_results = pickle.load(f)
-            print(f"Successfully loaded shrinkage results for {len(shrinkage_results.get('window_indices', []))} windows")
-            
-            # Filter shrinkage results to only include the requested window indices
-            if 'window_indices' in shrinkage_results and set(window_indices).issubset(set(shrinkage_results['window_indices'])):
-                print(f"Filtering shrinkage results to {len(window_indices)} requested windows")
-                # No need to filter if all windows are requested
-            else:
-                print(f"Warning: Not all requested windows found in shrinkage results.")
-                print(f"Running shrinkage optimization for {len(window_indices)} windows...")
-                shrinkage_results = run_factor_timing_optimization(
-                    rolling_data, 
-                    window_indices=window_indices, 
-                    max_portfolios=max_portfolios
-                )
-        except Exception as e:
-            print(f"Error loading shrinkage results: {e}")
-            print(f"Running shrinkage optimization for {len(window_indices)} windows...")
-            shrinkage_results = run_factor_timing_optimization(
-                rolling_data, 
-                window_indices=window_indices, 
-                max_portfolios=max_portfolios
-            )
-    else:
-        if run_shrinkage:
-            print(f"--run_shrinkage flag set, running shrinkage optimization...")
-        else:
-            print(f"Shrinkage results file not found, running shrinkage optimization...")
-        
-        shrinkage_results = run_factor_timing_optimization(
-            rolling_data, 
-            window_indices=window_indices, 
-            max_portfolios=max_portfolios
-        )
+    shrinkage_results = run_factor_timing_optimization(
+        rolling_data, 
+        window_indices=window_indices, 
+        max_portfolios=max_portfolios
+    )
     
     # 2. Create equal-weight benchmark
     print("\n===== PHASE 2: CREATING BENCHMARK =====")
@@ -311,6 +502,65 @@ def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shr
         'factor_names': factor_results['factor_names'],
         'benchmark_results': benchmark_results
     }
+    
+    # 5. Create time series of returns for cumulative performance plots
+    print("\n===== PHASE 4: PREPARING RETURN SERIES =====")
+    strategy_returns_series = {}
+    benchmark_returns_series = {}
+    
+    # Sort window indices by date to ensure chronological order
+    ordered_indices = sorted(window_indices, 
+                           key=lambda idx: pd.to_datetime(rolling_data['window_dates'][idx]['test_start']))
+    
+    for idx in ordered_indices:
+        if idx in test_results['test_returns'] and idx in benchmark_results['test_returns']:
+            try:
+                date_str = rolling_data['window_dates'][idx]['test_start']
+                date = pd.to_datetime(date_str)
+                
+                # Get returns for this window
+                strat_ret = test_results['test_returns'][idx]
+                bench_ret = benchmark_results['test_returns'][idx]
+                
+                # Store in time series dictionary (ensuring we have scalar values)
+                if isinstance(strat_ret, np.ndarray) and len(strat_ret) == 1:
+                    strat_ret = float(strat_ret[0])
+                elif isinstance(strat_ret, list) and len(strat_ret) == 1:
+                    strat_ret = float(strat_ret[0])
+                
+                if isinstance(bench_ret, np.ndarray) and len(bench_ret) == 1:
+                    bench_ret = float(bench_ret[0])
+                elif isinstance(bench_ret, list) and len(bench_ret) == 1:
+                    bench_ret = float(bench_ret[0])
+                
+                strategy_returns_series[date] = strat_ret
+                benchmark_returns_series[date] = bench_ret
+                
+                print(f"Added return for {date}: Strategy={strat_ret:.4f}, Benchmark={bench_ret:.4f}")
+            except Exception as e:
+                print(f"Error processing returns for window {idx}: {e}")
+    
+    # Create DataFrame of returns and store in results
+    if strategy_returns_series:
+        returns_df = pd.DataFrame({
+            'Strategy': pd.Series(strategy_returns_series),
+            'Equal-Weight': pd.Series(benchmark_returns_series)
+        })
+        
+        # Ensure the index is sorted chronologically
+        returns_df = returns_df.sort_index()
+        
+        # Store in results dictionary
+        test_results['strategy_returns'] = returns_df['Strategy']
+        test_results['benchmark_returns'] = returns_df['Equal-Weight']
+        
+        # Print some statistics
+        print(f"Created return series with {len(returns_df)} data points")
+        print(f"Date range: {returns_df.index.min()} to {returns_df.index.max()}")
+        print(f"Strategy mean monthly return: {returns_df['Strategy'].mean():.4f}")
+        print(f"Benchmark mean monthly return: {returns_df['Equal-Weight'].mean():.4f}")
+    else:
+        print("Warning: Could not create return series - no valid returns data found")
     
     elapsed_time = time.time() - start_time
     print(f"\nTest pipeline completed in {elapsed_time:.2f} seconds")
@@ -629,37 +879,27 @@ def plot_metrics(test_results, benchmark_results=None):
         fig_sharpe.savefig('sharpe_plot.pdf')
         plt.close(fig_sharpe)
         
-        # Plot cumulative returns comparison if benchmark is available
-        if benchmark_results:
-            # Get strategy and benchmark returns
-            strategy_returns = {}
-            benchmark_returns = {}
+        # Plot cumulative returns - using the directly stored return series
+        if 'strategy_returns' in test_results and 'benchmark_returns' in test_results:
+            strategy_returns = test_results['strategy_returns']
+            benchmark_returns = test_results['benchmark_returns']
             
-            for idx in sorted(test_results['window_indices']):
-                if idx in test_results['test_returns'] and idx in benchmark_results['test_returns']:
-                    try:
-                        date_str = test_results['window_dates'][idx]['test_start']
-                        date = pd.to_datetime(date_str)
-                        
-                        strat_ret = test_results['test_returns'][idx]
-                        bench_ret = benchmark_results['test_returns'][idx]
-                        
-                        # Skip NaN values
-                        if not np.isnan(strat_ret).any() and not np.isnan(bench_ret).any():
-                            strategy_returns[date] = strat_ret
-                            benchmark_returns[date] = bench_ret
-                    except Exception as e:
-                        print(f"Error processing returns for window {idx}: {e}")
-            
-            if strategy_returns:
+            if len(strategy_returns) > 0 and len(benchmark_returns) > 0:
                 # Create DataFrame of returns
                 returns_df = pd.DataFrame({
-                    'Strategy': pd.Series(strategy_returns),
-                    'Equal-Weight': pd.Series(benchmark_returns)
+                    'Strategy': strategy_returns,
+                    'Equal-Weight': benchmark_returns
                 })
                 
                 # Check if we have valid numeric data
                 if returns_df.shape[0] > 0 and not returns_df.isna().all().all():
+                    # Sort index to ensure chronological order
+                    returns_df = returns_df.sort_index()
+                    
+                    # Print data to help with debugging
+                    print(f"Return series shape: {returns_df.shape}")
+                    print(f"Return series head: \n{returns_df.head()}")
+                    
                     # Calculate cumulative returns
                     cum_returns = (1 + returns_df).cumprod()
                     
@@ -707,6 +947,30 @@ def plot_metrics(test_results, benchmark_results=None):
                         figures[plot_name] = fig
                         fig.savefig(f'{plot_name}_plot.pdf')
                         plt.close(fig)
+            else:
+                print("Warning: Empty return series for strategy or benchmark")
+                for plot_name, title in [('cumulative', 'Cumulative Returns'), 
+                                        ('drawdown', 'Drawdowns')]:
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    ax.text(0.5, 0.5, f"Empty return series for {title.lower()} plot", 
+                          horizontalalignment='center', verticalalignment='center',
+                          transform=ax.transAxes, fontsize=14)
+                    ax.set_title(f'{title} (No Data)')
+                    figures[plot_name] = fig
+                    fig.savefig(f'{plot_name}_plot.pdf')
+                    plt.close(fig)
+        else:
+            print("Warning: 'strategy_returns' or 'benchmark_returns' not found in test_results")
+            for plot_name, title in [('cumulative', 'Cumulative Returns'), 
+                                    ('drawdown', 'Drawdowns')]:
+                fig, ax = plt.subplots(figsize=(12, 6))
+                ax.text(0.5, 0.5, f"Missing return series for {title.lower()} plot", 
+                      horizontalalignment='center', verticalalignment='center',
+                      transform=ax.transAxes, fontsize=14)
+                ax.set_title(f'{title} (No Data)')
+                figures[plot_name] = fig
+                fig.savefig(f'{plot_name}_plot.pdf')
+                plt.close(fig)
         
         print(f"Successfully created {len(figures)} plots")
     except Exception as e:
@@ -747,12 +1011,12 @@ def export_test_results(test_results, rolling_data, benchmark_results=None):
     benchmark_results : dict, optional
         Equal-weight benchmark results
     """
-    print(f"Exporting test results to {OUTPUT_EXCEL_FILE} and {OUTPUT_PICKLE_FILE}...")
+    print(f"Exporting test results to {OUTPUT_EXCEL_FILE} and {TEST_RESULTS_FILE}...")
     
     # Save results as pickle
-    with open(OUTPUT_PICKLE_FILE, 'wb') as f:
+    with open(TEST_RESULTS_FILE, 'wb') as f:
         pickle.dump(test_results, f)
-    print(f"Saved complete results to {OUTPUT_PICKLE_FILE}")
+    print(f"Saved complete results to {TEST_RESULTS_FILE}")
     
     # Create summary DataFrame
     print("Creating summary DataFrame...")
@@ -926,50 +1190,293 @@ def export_test_results(test_results, rolling_data, benchmark_results=None):
     
     print("Export process completed.")
 
-def parse_arguments():
-    """Parse command-line arguments"""
-    parser = add_common_args('Run factor timing test pipeline')
+def run_performance_analysis(window_indices=None, max_windows=None, force=False):
+    """
+    Run the performance analysis step (Phase 6)
     
-    # Additional script-specific arguments
-    parser.add_argument('--run_shrinkage', action='store_true',
-                        help='Run shrinkage optimization even if results file exists')
-    parser.add_argument('--export_excel', action='store_true',
-                        help='Export results to Excel (default: True if not already exists)')
-    parser.add_argument('--export_plots', action='store_true',
-                        help='Export plots to PDF files (default: True)')
+    Args:
+        window_indices (str): Comma-separated window indices to process
+        max_windows (int): Maximum number of windows to process
+        force (bool): Whether to regenerate output even if it exists
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not os.path.exists(ROLLING_WINDOWS_FILE) or not os.path.exists(SHRINKAGE_RESULTS_FILE) or not os.path.exists(ROTATED_WEIGHTS_FILE):
+        print("Error: Missing required input files. Run previous steps first.")
+        return False
+    
+    if os.path.exists(TEST_RESULTS_FILE) and os.path.exists(OUTPUT_EXCEL_FILE) and not force:
+        print(f"Test results already exist. Use --force to regenerate.")
+        return False
+    
+    print("\n===== PHASE 6: PERFORMANCE ANALYSIS =====")
+    
+    try:
+        # Load rolling windows data
+        print("Loading rolling windows data...")
+        with open(ROLLING_WINDOWS_FILE, 'rb') as f:
+            rolling_data = pickle.load(f)
+        
+        # Load shrinkage results
+        print("Loading shrinkage results...")
+        with open(SHRINKAGE_RESULTS_FILE, 'rb') as f:
+            shrinkage_results = pickle.load(f)
+        
+        # Parse window indices if provided as string
+        if isinstance(window_indices, str):
+            window_indices = [int(idx.strip()) for idx in window_indices.split(',')]
+        
+        # Determine window indices to process
+        if window_indices is None and max_windows is not None:
+            window_indices = list(range(min(len(rolling_data['window_dates']), max_windows)))
+        elif window_indices is None:
+            window_indices = list(range(len(rolling_data['window_dates'])))
+        
+        print(f"Analyzing performance for {len(window_indices)} windows")
+        
+        # Create benchmark results
+        benchmark_results = create_equal_weight_benchmark(
+            shrinkage_results,
+            rolling_data,
+            window_indices
+        )
+        
+        # Process factor rotation results
+        factor_results = process_factor_rotation(shrinkage_results)
+        
+        # Combine all results
+        test_results = {
+            'window_indices': window_indices,
+            'window_dates': {i: rolling_data['window_dates'][i] for i in window_indices},
+            'optimal_lambdas': shrinkage_results['optimal_lambdas'],
+            'training_sharpe': shrinkage_results['training_sharpe'],
+            'validation_sharpe': shrinkage_results['validation_sharpe'],
+            'test_sharpe': shrinkage_results['test_sharpe'],
+            'test_returns': shrinkage_results['test_returns'],
+            'factor_weights': factor_results['factor_weights'],
+            'long_only_weights': factor_results['long_only_weights'],
+            'factor_names': factor_results['factor_names'],
+            'benchmark_results': benchmark_results
+        }
+        
+        # Create time series of returns for cumulative performance plots
+        print("\n===== CREATING RETURN SERIES =====")
+        strategy_returns_series = {}
+        benchmark_returns_series = {}
+        
+        # Sort window indices by date to ensure chronological order
+        ordered_indices = sorted(window_indices, 
+                              key=lambda idx: pd.to_datetime(rolling_data['window_dates'][idx]['test_start']))
+        
+        for idx in ordered_indices:
+            if idx in test_results['test_returns'] and idx in benchmark_results['test_returns']:
+                try:
+                    date_str = rolling_data['window_dates'][idx]['test_start']
+                    date = pd.to_datetime(date_str)
+                    
+                    # Get returns for this window
+                    strat_ret = test_results['test_returns'][idx]
+                    bench_ret = benchmark_results['test_returns'][idx]
+                    
+                    # Store in time series dictionary (ensuring we have scalar values)
+                    if isinstance(strat_ret, np.ndarray) and len(strat_ret) == 1:
+                        strat_ret = float(strat_ret[0])
+                    elif isinstance(strat_ret, list) and len(strat_ret) == 1:
+                        strat_ret = float(strat_ret[0])
+                    
+                    if isinstance(bench_ret, np.ndarray) and len(bench_ret) == 1:
+                        bench_ret = float(bench_ret[0])
+                    elif isinstance(bench_ret, list) and len(bench_ret) == 1:
+                        bench_ret = float(bench_ret[0])
+                    
+                    strategy_returns_series[date] = strat_ret
+                    benchmark_returns_series[date] = bench_ret
+                except Exception as e:
+                    print(f"Error processing returns for window {idx}: {e}")
+        
+        # Create DataFrame of returns and store in results
+        if strategy_returns_series:
+            returns_df = pd.DataFrame({
+                'Strategy': pd.Series(strategy_returns_series),
+                'Equal-Weight': pd.Series(benchmark_returns_series)
+            })
+            
+            # Ensure the index is sorted chronologically
+            returns_df = returns_df.sort_index()
+            
+            # Store in results dictionary
+            test_results['strategy_returns'] = returns_df['Strategy']
+            test_results['benchmark_returns'] = returns_df['Equal-Weight']
+            
+            # Print some statistics
+            print(f"Created return series with {len(returns_df)} data points")
+            print(f"Date range: {returns_df.index.min()} to {returns_df.index.max()}")
+            print(f"Strategy mean monthly return: {returns_df['Strategy'].mean():.4f}")
+            print(f"Benchmark mean monthly return: {returns_df['Equal-Weight'].mean():.4f}")
+        else:
+            print("Warning: Could not create return series - no valid returns data found")
+        
+        # Generate visualizations
+        print("\n===== GENERATING VISUALIZATIONS =====")
+        figures = plot_metrics(test_results, benchmark_results)
+        
+        # Save the figures
+        print("Saving figures...")
+        for name, fig in figures.items():
+            filename = f"{name}.pdf"
+            fig.savefig(filename, bbox_inches='tight')
+            print(f"  Saved {filename}")
+            plt.close(fig)
+        
+        # Export results to Excel and pickle
+        print("\n===== EXPORTING RESULTS =====")
+        export_test_results(test_results, rolling_data, benchmark_results)
+        
+        print("Performance analysis complete.")
+        return True
+    except Exception as e:
+        print(f"Error running performance analysis: {e}")
+        traceback.print_exc()
+        return False
+
+def parse_arguments():
+    """
+    Parse command-line arguments for the pipeline
+    
+    Returns:
+        argparse.Namespace: Parsed arguments
+    """
+    parser = argparse.ArgumentParser(description='Run the complete factor timing pipeline')
+    
+    # Pipeline control arguments
+    parser.add_argument('--start_phase', type=int, default=1, choices=range(1, 7),
+                      help='Starting phase (1=data_prep, 2=rolling_windows, 3=shrinkage, 4=extract_weights, 5=factor_rotation, 6=performance)')
+    parser.add_argument('--end_phase', type=int, default=6, choices=range(1, 7),
+                      help='Ending phase (default: 6)')
+    parser.add_argument('--force', action='store_true',
+                      help='Force regeneration of output files even if they exist')
+    
+    # Add window selection arguments directly
+    window_group = parser.add_mutually_exclusive_group()
+    window_group.add_argument('--window_indices', type=str,
+                      help='Specific window indices to process, comma-separated (e.g., "120,121,122")')
+    window_group.add_argument('--find_2010_window', action='store_true',
+                      help='Find and process window around 2010')
+    
+    # Date range options
+    date_group = parser.add_argument_group('date range options')
+    date_group.add_argument('--start_date', type=str,
+                      help='Start date for test period (YYYY-MM-DD)')
+    date_group.add_argument('--end_date', type=str,
+                      help='End date for test period (YYYY-MM-DD)')
+    
+    # Other options
+    parser.add_argument('--max_windows', type=int, default=5,
+                      help='Maximum number of windows to process (default: 5, 0 for all windows)')
+    parser.add_argument('--max_portfolios', type=int, default=2000,
+                      help='Maximum number of portfolios to analyze (default: 2000)')
     
     return parser.parse_args()
 
 def main():
-    """Run factor timing test pipeline"""
-    # Parse command-line arguments
+    """
+    Run the complete factor timing pipeline
+    """
     args = parse_arguments()
     
     # Start timing
     start_time = time.time()
-    print("===== PHASE 1: INITIALIZATION =====")
     
-    # Load rolling windows data
-    print("Loading rolling windows data...")
-    with open(ROLLING_WINDOWS_FILE, 'rb') as f:
-        rolling_data = pickle.load(f)
+    print("=== FACTOR TIMING COMPLETE PIPELINE ===")
+    print(f"Starting at phase {args.start_phase}, ending at phase {args.end_phase}")
     
-    # Get window indices to process
-    window_indices = parse_window_indices(args, rolling_data)
-    if not window_indices:
-        print("No windows to process. Exiting.")
-        return
+    # Parse window indices if provided
+    window_indices_str = None
+    window_indices = None
     
-    # Run test pipeline
-    test_results = run_test_pipeline(
-        rolling_data, 
-        window_indices,
-        max_portfolios=args.max_portfolios,
-        run_shrinkage=args.run_shrinkage
-    )
+    # Check if any window selection arguments were provided
+    has_window_selection = False
+    for attr in ['window_indices', 'start_date', 'end_date', 'find_2010_window']:
+        if hasattr(args, attr) and getattr(args, attr):
+            has_window_selection = True
+            break
     
-    # Export results
-    export_test_results(test_results, rolling_data, test_results['benchmark_results'])
+    if has_window_selection:
+        # We'll need to load the rolling windows data to parse these
+        if os.path.exists(ROLLING_WINDOWS_FILE):
+            rolling_data = load_rolling_windows()
+            if rolling_data:
+                window_indices = parse_window_indices(args, rolling_data)
+                if window_indices:
+                    window_indices_str = ','.join(map(str, window_indices))
+                    print(f"Selected {len(window_indices)} windows: {window_indices_str}")
+        else:
+            print("Warning: Can't parse window indices without rolling_windows.pkl")
+            print("Window selection will be applied starting from Phase 3")
+    
+    # Phase 1: Data Preparation
+    if args.start_phase <= 1 and args.end_phase >= 1:
+        if not run_data_preparation(force=args.force):
+            if args.start_phase == 1:
+                print("Failed to complete data preparation. Exiting.")
+                return
+    
+    # Phase 2: Rolling Windows
+    if args.start_phase <= 2 and args.end_phase >= 2:
+        if not run_rolling_windows(force=args.force):
+            if args.start_phase == 2:
+                print("Failed to complete rolling windows generation. Exiting.")
+                return
+    
+    # Phase 3: Shrinkage Optimization
+    if args.start_phase <= 3 and args.end_phase >= 3:
+        if not run_shrinkage_optimization(
+            window_indices=window_indices_str, 
+            max_windows=args.max_windows,
+            force=args.force
+        ):
+            if args.start_phase == 3:
+                print("Failed to complete shrinkage optimization. Exiting.")
+                return
+    
+    # Phase 4: Extract Weights
+    if args.start_phase <= 4 and args.end_phase >= 4:
+        if not run_extract_weights(force=args.force):
+            if args.start_phase == 4:
+                print("Failed to complete weight extraction. Exiting.")
+                return
+    
+    # Phase 5: Factor Rotation
+    if args.start_phase <= 5 and args.end_phase >= 5:
+        if not run_factor_rotation(force=args.force):
+            if args.start_phase == 5:
+                print("Failed to complete factor rotation. Exiting.")
+                return
+    
+    # Phase 6: Performance Analysis
+    if args.start_phase <= 6 and args.end_phase >= 6:
+        if not run_performance_analysis(
+            window_indices=window_indices,
+            max_windows=args.max_windows,
+            force=args.force
+        ):
+            if args.start_phase == 6:
+                print("Failed to complete performance analysis. Exiting.")
+                return
+    
+    # Calculate total elapsed time
+    elapsed_time = time.time() - start_time
+    hours, remainder = divmod(elapsed_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    print(f"\n=== PIPELINE EXECUTION COMPLETE ===")
+    if hours > 0:
+        print(f"Total elapsed time: {int(hours)}h {int(minutes)}m {seconds:.1f}s")
+    elif minutes > 0:
+        print(f"Total elapsed time: {int(minutes)}m {seconds:.1f}s")
+    else:
+        print(f"Total elapsed time: {seconds:.1f}s")
 
 if __name__ == "__main__":
-    main() 
+    main()
