@@ -1,5 +1,5 @@
 """
-# Factor Timing Top 5 Implementation
+# Factor Timing Shrinkage Implementation
 # 
 # INPUT FILES:
 # - rolling_windows.pkl: Dictionary containing training, validation, and testing windows
@@ -7,16 +7,19 @@
 #
 # OUTPUT FILES:
 # - shrinkage_results.pkl: Dictionary containing:
-#   - portfolio_weights: Equal weights (20%) for top 5 portfolios
+#   - optimal_lambdas: Optimal lambda values for each period
+#   - portfolio_weights: Optimal portfolio weights for each window
 #   - performance_metrics: Out-of-sample performance results
+#   - shrinkage_intensities: Ledoit-Wolf shrinkage intensity for each window
 #
-# This script implements a simplified factor timing methodology:
-# 1. Selects the top 5 best performing portfolios based on training data
-# 2. Assigns equal weights (20% each) to these 5 portfolios
-# 3. Evaluates performance on validation and test windows
+# This script implements Phase 2.2 of the factor timing methodology:
+# 1. Applies Ledoit-Wolf covariance shrinkage to handle estimation error
+# 2. Implements regularization to shrink portfolio weights toward static strategy
+# 3. Optimizes lambda parameter using validation windows
+# 4. Calculates optimal portfolio weights for out-of-sample testing
 #
 # Author: Claude
-# Last Updated: May 2025
+# Last Updated: May 2023
 """
 
 import pandas as pd
@@ -36,7 +39,7 @@ from factor_timing_params import add_common_args, parse_window_indices, load_rol
 
 # Define input/output files
 ROLLING_WINDOWS_FILE = "rolling_windows.pkl"
-SHRINKAGE_RESULTS_FILE = "top5_equal_weight_results.pkl"
+SHRINKAGE_RESULTS_FILE = "shrinkage_results.pkl"
 
 # Cache for cleaned returns data to avoid redundant cleaning
 _cleaned_returns_cache = {}
@@ -97,7 +100,7 @@ def clean_returns_data(returns):
     
     return cleaned_returns
 
-def select_top_portfolios(returns, n=5):
+def select_top_portfolios(returns, n=2000):
     """
     Select top N portfolios based on trailing returns
     
@@ -106,7 +109,7 @@ def select_top_portfolios(returns, n=5):
     returns : DataFrame
         Returns data for all portfolios
     n : int
-        Number of top portfolios to select (default: 5)
+        Number of top portfolios to select
     
     Returns:
     --------
@@ -119,36 +122,12 @@ def select_top_portfolios(returns, n=5):
     mean_returns = returns.mean()
     
     # Select top N portfolios by mean return
-    top_n_indices = mean_returns.nlargest(n).index  # Removed .abs() to focus on highest positive returns
+    top_n_indices = mean_returns.abs().nlargest(n).index
     top_returns = returns[top_n_indices]
     
-    print(f"Selected {top_returns.shape[1]} portfolios: {list(top_n_indices)}")
+    print(f"Selected {top_returns.shape[1]} portfolios")
     
     return top_returns
-
-def equal_weight_portfolios(returns):
-    """
-    Assign equal weights to portfolios
-    
-    Parameters:
-    -----------
-    returns : DataFrame
-        Returns data for portfolios
-        
-    Returns:
-    --------
-    weights : ndarray
-        Equal weights for each portfolio (20% each for 5 portfolios)
-    """
-    num_portfolios = returns.shape[1]
-    print(f"Assigning equal weights to {num_portfolios} portfolios...")
-    
-    # Create equal weights (20% each for 5 portfolios)
-    weights = np.ones(num_portfolios) / num_portfolios
-    
-    print(f"Created equal weights: {weights}")
-    
-    return weights
 
 def ledoit_wolf_shrinkage(returns):
     """
@@ -386,9 +365,9 @@ def optimize_lambda(training_window, validation_window, lambda_grid=None):
     
     return fixed_lambda, shrinkage_intensity
 
-def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfolios=5):
+def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfolios=2000):
     """
-    Run the factor timing optimization for specified windows using top 5 equal-weighted portfolios
+    Run the factor timing optimization for specified windows
     
     Parameters:
     -----------
@@ -397,14 +376,14 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
     window_indices : list, optional
         Specific windows to process. If None, process all windows.
     max_portfolios : int
-        Number of top portfolios to select (default: 5)
+        Maximum number of portfolios to include in the analysis
         
     Returns:
     --------
     results : dict
         Results of optimization
     """
-    print("Running top 5 equal-weighted portfolio selection...")
+    print("Running factor timing optimization...")
     start_time = time.time()
     
     total_windows = len(rolling_data['training_windows'])
@@ -413,23 +392,28 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         window_indices = list(range(total_windows))
     
     print(f"Processing {len(window_indices)} windows...")
-    print(f"Using top {max_portfolios} portfolios with equal weights")
+    print(f"Using {max_portfolios} portfolios")
     
     # Initialize results
     results = {
         'window_indices': window_indices,
+        'optimal_lambdas': {},
         'portfolio_weights': {},
         'training_sharpe': {},
         'validation_sharpe': {},
         'test_returns': {},
         'test_sharpe': {},
         'window_dates': {},
-        'selected_portfolios': {}
+        'selected_portfolios': {},
+        'predictors': {},
+        'shrinkage_intensities': {}  # Added to store shrinkage intensity
     }
     
     # Copy the window dates we'll process
     for i in window_indices:
         results['window_dates'][i] = rolling_data['window_dates'][i]
+    
+    # No longer need lambda grid since we're using fixed value
     
     for i in window_indices:
         window_start_time = time.time()
@@ -454,7 +438,7 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         print(f"Validation period: {val_start} to {val_end}")
         print(f"Test period:       {test_start} to {test_end}")
         
-        # Select top 5 portfolios based on training returns
+        # Select top portfolios based on training returns
         training_window = select_top_portfolios(training_window, n=max_portfolios)
         # Select same portfolios for validation and testing
         selected_columns = training_window.columns
@@ -464,8 +448,16 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         # Store selected portfolio columns
         results['selected_portfolios'][i] = selected_columns
         
-        # Assign equal weights to the top 5 portfolios (20% each)
-        weights = equal_weight_portfolios(training_window)
+        # Get fixed lambda and shrinkage intensity 
+        optimal_lambda, shrinkage_intensity = optimize_lambda(training_window, validation_window)
+        results['optimal_lambdas'][i] = optimal_lambda
+        results['shrinkage_intensities'][i] = shrinkage_intensity # Store the intensity
+        
+        # Apply Ledoit-Wolf shrinkage to get covariance matrix
+        cov_matrix, _ = ledoit_wolf_shrinkage(training_window) # Ignore intensity here
+        
+        # Calculate final weights with fixed lambda
+        weights = optimal_portfolio_weights(training_window, cov_matrix, optimal_lambda)
         results['portfolio_weights'][i] = weights
         
         # Calculate performance metrics
@@ -484,23 +476,28 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         results['test_returns'][i] = test_returns
         results['test_sharpe'][i] = test_sharpe
         
+        # Get predictors for this window if available
+        if 'predictors' in rolling_data and i in rolling_data['predictors']:
+            results['predictors'][i] = rolling_data['predictors'][i]
+        
         window_elapsed_time = time.time() - window_start_time
         print(f"\nWindow {i+1} Results (completed in {window_elapsed_time:.2f} seconds):")
         print(f"  Training Sharpe:   {train_sharpe:.4f}")
         print(f"  Validation Sharpe: {valid_sharpe:.4f}")
         print(f"  Test Sharpe:       {test_sharpe:.4f}")
+        
+        # Clear cache after each window to save memory
+        _cleaned_returns_cache.clear()
+        gc.collect()
     
-    # Calculate overall out-of-sample Sharpe ratio
-    all_test_returns = []
-    for i in window_indices:
-        if i in results['test_returns']:
-            all_test_returns.extend(results['test_returns'][i])
+    # Calculate overall test Sharpe ratio
+    all_test_returns = np.concatenate([results['test_returns'][i] for i in window_indices])
+    overall_test_sharpe = calculate_sharpe_ratio(all_test_returns)
+    results['overall_test_sharpe'] = overall_test_sharpe
     
-    overall_sharpe = calculate_sharpe_ratio(all_test_returns)
-    print(f"\nOverall out-of-sample Sharpe ratio: {overall_sharpe:.4f}")
-    
-    elapsed_time = time.time() - start_time
-    print(f"Optimization completed in {elapsed_time:.2f} seconds")
+    total_elapsed_time = time.time() - start_time
+    print(f"\nOptimization completed in {total_elapsed_time:.2f} seconds")
+    print(f"Overall out-of-sample Sharpe ratio: {overall_test_sharpe:.4f}")
     
     return results
 
@@ -593,11 +590,16 @@ def save_results(results, file_path=SHRINKAGE_RESULTS_FILE):
 
 def parse_arguments():
     """Parse command-line arguments"""
-    parser = add_common_args('Run top 5 equal-weighted portfolio selection')
+    parser = add_common_args('Run shrinkage optimization for factor timing')
     
     # Additional script-specific arguments
+    parser.add_argument('--num_processes', type=int, default=os.cpu_count(),
+                       help=f'Number of processes to use (default: {os.cpu_count()})')
     parser.add_argument('--output_file', type=str, default=SHRINKAGE_RESULTS_FILE,
                        help=f'Output file path (default: {SHRINKAGE_RESULTS_FILE})')
+    
+    # Override the default max_windows to 0 (process all windows)
+    parser.set_defaults(max_windows=0)
     
     return parser.parse_args()
 
@@ -620,8 +622,10 @@ def find_window_by_year(window_dates, target_year=2010):
     return closest_idx
 
 def main():
-    """Main function to run top 5 equal-weighted portfolio selection"""
+    """Main function to run shrinkage optimization"""
     args = parse_arguments()
+    
+    # No longer need to parse lambda values since we're using a fixed value
     
     # Load rolling windows data
     rolling_data = load_rolling_windows()
@@ -634,21 +638,22 @@ def main():
         print("No windows to process. Exiting.")
         return
     
-    print(f"Processing {len(window_indices)} windows using top 5 equal-weighted portfolios...")
+    print(f"Processing {len(window_indices)} windows with fixed lambda value 0.01...")
+    print(f"Using {args.num_processes} concurrent processes")
     
-    # Process top 5 equal-weighted portfolio selection
+    # Process shrinkage optimization
     results = run_factor_timing_optimization(
         rolling_data,
         window_indices=window_indices,
-        max_portfolios=5  # Fixed to always use top 5 portfolios
+        max_portfolios=args.max_portfolios
     )
     
     # Save results
-    print(f"Saving results to {args.output_file}...")
+    print(f"Saving shrinkage results to {args.output_file}...")
     with open(args.output_file, 'wb') as f:
         pickle.dump(results, f)
     
-    print("Top 5 equal-weighted portfolio selection completed successfully.")
+    print("Shrinkage optimization completed successfully.")
 
 if __name__ == "__main__":
     main()

@@ -27,8 +27,8 @@ from factor_timing_params import add_common_args, parse_window_indices
 # Import functions from other modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
-    from factor_timing_shrinkage import run_factor_timing_optimization, calculate_sharpe_ratio
-    from factor_rotation import extract_factor_names, rotate_portfolio_weights, apply_long_only_constraint
+    from Step_3_shrinkage import run_factor_timing_optimization, calculate_sharpe_ratio
+    from Step_5_factor_rotation import extract_factor_names, rotate_portfolio_weights, apply_long_only_constraint
 except ImportError as e:
     print(f"Error importing functions from other modules: {e}")
     print("Make sure all required scripts are in the same directory.")
@@ -937,6 +937,9 @@ def parse_arguments():
                         help='Export results to Excel (default: True if not already exists)')
     parser.add_argument('--export_plots', action='store_true',
                         help='Export plots to PDF files (default: True)')
+    
+    # Override the default max_windows to 0 (process all windows)
+    parser.set_defaults(max_windows=0)
     
     return parser.parse_args()
 
