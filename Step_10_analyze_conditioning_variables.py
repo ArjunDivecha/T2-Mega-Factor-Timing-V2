@@ -26,6 +26,22 @@ import json
 import time
 import dotenv
 
+# We'll use requests to communicate with LM Studio instead of anthropic
+import requests
+
+# Check if LM Studio is available by trying to connect to its API
+LM_STUDIO_AVAILABLE = False
+try:
+    response = requests.get("http://localhost:1234/v1/models")
+    if response.status_code == 200:
+        LM_STUDIO_AVAILABLE = True
+        print("LM Studio API is available")
+    else:
+        print(f"LM Studio API returned status code {response.status_code}")
+except Exception as e:
+    print(f"Error connecting to LM Studio API: {e}")
+    print("Warning: LM Studio API not available. Analysis will be skipped.")
+
 # Set plot style
 plt.style.use('ggplot')
 sns.set_theme(style="whitegrid")
@@ -281,23 +297,21 @@ def plot_factor_specific_conditioning(factor_specific_importance, top_factors, o
         print(f"Saved plot to {output_file}")
 
 def get_claude_analysis(analysis_data):
-    """Get a detailed written analysis from Claude API"""
-    print("\nGetting detailed analysis from Claude 3.5...")
+    """Get detailed analysis from LM Studio API"""
     
-    # Load environment variables from .env file
+    # Load environment variables from .env file (keeping this for other potential env vars)
     dotenv.load_dotenv()
-    
-    # API configuration
-    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-    if not ANTHROPIC_API_KEY:
-        print("Error: ANTHROPIC_API_KEY not found in environment variables.")
-        print("Please create a .env file with your API key or set it as an environment variable.")
-        return None
-        
-    ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-    
+
+    # No need for API key with LM Studio as it's running locally
+    print("Using local LM Studio API - no API key required")
+
     # Prepare the prompt with analysis data
     prompt = f"""
+    You are writing a formal financial research paper analyzing conditioning variables in a factor timing model.
+    
+    DO NOT include any thinking or planning in your response. Just write the final analysis directly.
+    Format your response with proper markdown headings, bullet points, and emphasis where appropriate.
+    
     You are an expert in financial analysis and factor investing. I need you to analyze the following data about conditioning variables in a factor timing model.
     
     Top 10 conditioning variables by average absolute weight:
@@ -330,51 +344,73 @@ def get_claude_analysis(analysis_data):
     Please write in a professional, academic style suitable for a financial research paper.
     """
     
-    # Prepare the API request
-    headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    }
-    
-    data = {
-        "model": "claude-3-haiku-20240307",
-        "max_tokens": 4000,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
-    }
+    # Check if LM Studio is available
+    if not LM_STUDIO_AVAILABLE:
+        print("Error: LM Studio API is not available. Please ensure LM Studio is running on http://localhost:1234")
+        return None
     
     # Make the API call with retry logic
     max_retries = 3
+    last_error = None
     for attempt in range(max_retries):
         try:
-            response = requests.post(ANTHROPIC_API_URL, headers=headers, json=data)
-            response.raise_for_status()  # Raise exception for 4XX/5XX responses
+            # Create a request to LM Studio API
+            data = {
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 4000,
+                "temperature": 0.7,
+                "model": "qwen3-30b-a3b-mlx@8bit"  # Specify the model you want to use
+            }
             
-            # Parse the response
-            result = response.json()
-            if 'content' in result and len(result['content']) > 0:
-                analysis_text = result['content'][0]['text']
+            response = requests.post("http://localhost:1234/v1/chat/completions", json=data)
+            
+            if response.status_code == 200:
+                result = response.json()
+                content = result['choices'][0]['message']['content']
                 
-                # Save the analysis to a file
-                with open('conditioning_var_analysis/claude_analysis.md', 'w') as f:
-                    f.write(analysis_text)
-                    
-                print("Claude analysis saved to conditioning_var_analysis/claude_analysis.md")
-                return analysis_text
-            else:
-                print(f"Error: Unexpected response format from Claude API")
-                return None
+                # Remove the thinking part if it exists
+                if content.startswith('<think>'):
+                    thinking_end = content.find('</think>')
+                    if thinking_end != -1:
+                        content = content[thinking_end + 8:].strip()  # 8 is the length of '</think>'
                 
-        except requests.exceptions.RequestException as e:
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt  # Exponential backoff
-                print(f"API call failed: {e}. Retrying in {wait_time} seconds...")
-                time.sleep(wait_time)
+                # Clean up the content and improve formatting
+                # Add title
+                formatted_content = "# Conditioning Variables Analysis for Factor Timing Model\n\n"
+                
+                # Add sections with proper markdown formatting
+                sections = content.split('\n\n')
+                for section in sections:
+                    if section.strip():
+                        # Check if this is a section header
+                        if section.strip().startswith('#'):
+                            formatted_content += section + "\n\n"
+                        # If it contains a numbered list item, preserve it
+                        elif any(line.strip().startswith(str(i) + '.') for i in range(1, 6) for line in section.split('\n')):
+                            formatted_content += section + "\n\n"
+                        # Otherwise, add a section header if it seems like a new topic
+                        else:
+                            # Look for potential section titles (first sentence of paragraph)
+                            first_line = section.split('.')[0].strip()
+                            if len(first_line) < 100 and first_line and not first_line.startswith('-'):
+                                formatted_content += "## " + first_line + "\n\n"
+                                rest_of_section = '.'.join(section.split('.')[1:]).strip()
+                                if rest_of_section:
+                                    formatted_content += rest_of_section + "\n\n"
+                            else:
+                                formatted_content += section + "\n\n"
+                
+                return formatted_content
             else:
-                print(f"Failed to get analysis from Claude API after {max_retries} attempts: {e}")
-                return None
+                raise Exception(f"API returned status code {response.status_code}: {response.text}")
+            
+        except Exception as e:
+            last_error = e
+            print(f"API call failed: {e}. Retrying in {attempt + 1} seconds...")
+            time.sleep(attempt + 1)  # Exponential backoff
+    
+    print(f"Failed to get analysis from LM Studio API after {max_retries} attempts: {last_error}")
+    return None
     
     return None
 
@@ -471,12 +507,28 @@ def main():
         'latest_data': latest_data
     }
     
-    # Get Claude analysis
-    claude_analysis = get_claude_analysis(analysis_data)
+    # Get LM Studio analysis
+    lm_studio_analysis = get_claude_analysis(analysis_data)
     
-    if claude_analysis:
-        print("\nClaude Analysis Preview (first 500 characters):")
-        print(claude_analysis[:500] + "...")
+    if lm_studio_analysis:
+        # Save LM Studio analysis to file
+        with open(os.path.join(output_dir, 'lm_studio_analysis.md'), 'w') as f:
+            f.write(lm_studio_analysis)
+        
+        # Print a preview of the analysis
+        print("\nAnalysis from LM Studio (preview):")
+        
+        # Get the first few sections for preview
+        sections = lm_studio_analysis.split('##')
+        if len(sections) > 1:
+            preview = sections[0] + '## ' + sections[1]
+            if len(preview) > 800:
+                preview = preview[:800] + '...'
+        else:
+            preview_length = 500  # Show first 500 characters
+            preview = lm_studio_analysis[:preview_length] + "..." if len(lm_studio_analysis) > preview_length else lm_studio_analysis
+            
+        print(preview)
     
     print(f"\nAnalysis complete. Results saved to {output_dir}/")
 

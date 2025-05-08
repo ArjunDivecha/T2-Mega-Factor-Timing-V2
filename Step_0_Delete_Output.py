@@ -51,6 +51,15 @@ def main():
             print(f"Deleted: {pdf_file}")
             deleted_count += 1
     
+    # Delete files in conditioning_var_analysis directory
+    conditioning_dir = "conditioning_var_analysis"
+    if os.path.exists(conditioning_dir) and os.path.isdir(conditioning_dir):
+        conditioning_files = glob.glob(os.path.join(conditioning_dir, "*"))
+        for file_path in conditioning_files:
+            if os.path.isfile(file_path) and delete_file(file_path):
+                print(f"Deleted: {file_path}")
+                deleted_count += 1
+    
     # Summary
     elapsed_time = time.time() - start_time
     print(f"\nDeleted {deleted_count} files in {elapsed_time:.2f} seconds")
