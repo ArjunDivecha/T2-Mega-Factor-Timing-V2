@@ -252,7 +252,6 @@ def run_test_pipeline(rolling_data, window_indices, max_portfolios=2000, run_shr
         'window_dates': {i: rolling_data['window_dates'][i] for i in window_indices},
         'optimal_lambdas': shrinkage_results['optimal_lambdas'],
         'training_sharpe': shrinkage_results['training_sharpe'],
-        'validation_sharpe': shrinkage_results['validation_sharpe'],
         'test_sharpe': shrinkage_results['test_sharpe'],
         'test_returns': shrinkage_results['test_returns'],
         'factor_weights': factor_results['factor_weights'],
@@ -476,18 +475,17 @@ def create_summary_dataframe(test_results):
     for idx in sorted(test_results['window_indices']):
         # Get window dates
         if idx in test_results['window_dates']:
-            # Get date information
-            dates = test_results['window_dates'][idx]
-            train_start = pd.to_datetime(dates['train_start'])
-            train_end = pd.to_datetime(dates['train_end'])
-            val_start = pd.to_datetime(dates['val_start']) if 'val_start' in dates else None
-            val_end = pd.to_datetime(dates['val_end']) if 'val_end' in dates else None
-            test_date = pd.to_datetime(dates['test_start'])
+            # Get date info
+            window_date = test_results['window_dates'].get(idx, {})
+            train_start = window_date.get('train_start', pd.NaT)
+            train_end = window_date.get('train_end', pd.NaT)
+            test_start = window_date.get('test_start', pd.NaT)
+            test_end = window_date.get('test_end', pd.NaT)
+            test_date = pd.to_datetime(test_start)
             
             # Get performance metrics
             lambda_val = test_results['optimal_lambdas'].get(idx, np.nan)
             train_sharpe = test_results['training_sharpe'].get(idx, np.nan)
-            val_sharpe = test_results['validation_sharpe'].get(idx, np.nan)
             test_sharpe = test_results['test_sharpe'].get(idx, np.nan)
             
             # Create row
@@ -497,7 +495,6 @@ def create_summary_dataframe(test_results):
                 'Training Period': f"{train_start.strftime('%Y-%m')} to {train_end.strftime('%Y-%m')}",
                 'Lambda': lambda_val,
                 'Training Sharpe': train_sharpe,
-                'Validation Sharpe': val_sharpe,
                 'Test Sharpe': test_sharpe
             }
             
@@ -558,16 +555,13 @@ def plot_metrics(test_results):
                     
                     lambda_val = test_results['optimal_lambdas'].get(idx, np.nan)
                     train_sharpe = test_results['training_sharpe'].get(idx, np.nan)
-                    val_sharpe = test_results['validation_sharpe'].get(idx, np.nan)
                     test_sharpe = test_results['test_sharpe'].get(idx, np.nan)
                     
                     # Only add valid numeric values
-                    if not (np.isnan(lambda_val) and np.isnan(train_sharpe) and 
-                            np.isnan(val_sharpe) and np.isnan(test_sharpe)):
+                    if not (np.isnan(lambda_val) and np.isnan(train_sharpe) and np.isnan(test_sharpe)):
                         dates.append(date)
                         lambdas.append(lambda_val)
                         train_sharpes.append(train_sharpe)
-                        val_sharpes.append(val_sharpe)
                         test_sharpes.append(test_sharpe)
                 except Exception as e:
                     print(f"Error processing window {idx}: {e}")
@@ -622,10 +616,10 @@ def plot_metrics(test_results):
             # For single point, use bar chart
             bar_width = 30
             ind = np.arange(1)
-            bars = ax_sharpe.bar(ind, [train_sharpes[0], val_sharpes[0], test_sharpes[0]], width=0.25)
+            bars = ax_sharpe.bar(ind, [train_sharpes[0], test_sharpes[0]], width=0.25)
             ax_sharpe.set_xticks(ind)
             ax_sharpe.set_xticklabels(['Single Window'])
-            ax_sharpe.legend(['Training', 'Validation', 'Test'])
+            ax_sharpe.legend(['Training', 'Test'])
             # Add text labels
             for i, bar in enumerate(bars):
                 height = bar.get_height()
@@ -635,15 +629,11 @@ def plot_metrics(test_results):
         else:
             # Filter out NaN values for each line
             valid_train = [(d, s) for d, s in zip(dates, train_sharpes) if not np.isnan(s)]
-            valid_val = [(d, s) for d, s in zip(dates, val_sharpes) if not np.isnan(s)]
             valid_test = [(d, s) for d, s in zip(dates, test_sharpes) if not np.isnan(s)]
             
             if valid_train:
                 train_x, train_y = zip(*valid_train)
                 ax_sharpe.plot(train_x, train_y, marker='o', linestyle='-', label='Training', color='blue')
-            if valid_val:
-                val_x, val_y = zip(*valid_val)
-                ax_sharpe.plot(val_x, val_y, marker='s', linestyle='-', label='Validation', color='green')
             if valid_test:
                 test_x, test_y = zip(*valid_test)
                 ax_sharpe.plot(test_x, test_y, marker='^', linestyle='-', label='Test', color='red')
@@ -825,7 +815,7 @@ def export_test_results(test_results, rolling_data):
                 'File': ['lambda_plot.pdf', 'sharpe_plot.pdf', 'cumulative_plot.pdf', 'drawdown_plot.pdf'],
                 'Description': [
                     'Shows the evolution of the optimal lambda parameter over time',
-                    'Shows the evolution of training, validation, and test Sharpe ratios over time',
+                    'Shows the evolution of training and test Sharpe ratios over time',
                     'Shows the cumulative returns of the strategy vs. equal-weight benchmark',
                     'Shows the drawdowns of the strategy vs. equal-weight benchmark'
                 ]

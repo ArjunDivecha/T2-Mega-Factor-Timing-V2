@@ -1,19 +1,19 @@
 """
-# Factor Timing Top 10 Implementation
+# Factor Timing Top 5 Implementation
 # 
 # INPUT FILES:
-# - rolling_windows.pkl: Dictionary containing training, validation, and testing windows
+# - rolling_windows.pkl: Dictionary containing training and testing windows
 #   created in the previous phase
 #
 # OUTPUT FILES:
 # - shrinkage_results.pkl: Dictionary containing:
-#   - portfolio_weights: Equal weights (10%) for top 10 portfolios
+#   - portfolio_weights: Equal weights (20%) for top 5 portfolios
 #   - performance_metrics: Out-of-sample performance results
 #
 # This script implements a simplified factor timing methodology:
-# 1. Selects the top 10 best performing portfolios based on training data
-# 2. Assigns equal weights (10% each) to these 10 portfolios
-# 3. Evaluates performance on validation and test windows
+# 1. Selects the top 5 best performing portfolios based on training data
+# 2. Assigns equal weights (20%) for each portfolio
+# 3. Evaluates performance directly on the test window (no validation)
 #
 # Author: Claude
 # Last Updated: May 2025
@@ -97,7 +97,7 @@ def clean_returns_data(returns):
     
     return cleaned_returns
 
-def select_top_portfolios(returns, n=10):
+def select_top_portfolios(returns, n=5):
     """
     Select top N portfolios based on trailing returns
     
@@ -140,16 +140,15 @@ def equal_weight_portfolios(returns, all_portfolio_names):
     Returns:
     --------
     weights : ndarray
-        Weights for all portfolios (10% each for selected portfolios, 0 for others)
+        Weights for all portfolios (20% each for selected portfolios, 0 for others)
     """
     selected_portfolios = returns.columns
     num_selected = len(selected_portfolios)
-    num_all_portfolios = len(all_portfolio_names)
-    
-    print(f"Assigning equal weights ({1.0/num_selected:.2f} each) to {num_selected} selected portfolios out of {num_all_portfolios} total portfolios")
+    equal_weight = 1.0 / len(selected_portfolios) if len(selected_portfolios) > 0 else 0.0
+    print(f"Assigning equal weights ({equal_weight:.2f} each) to {len(selected_portfolios)} selected portfolios out of {len(all_portfolio_names)} total portfolios")
     
     # Create a weights array with zeros for all portfolios
-    weights = np.zeros(num_all_portfolios)
+    weights = np.zeros(len(all_portfolio_names))
     
     # Get the indices of the selected portfolios in the all_portfolio_names array
     for i, portfolio in enumerate(all_portfolio_names):
@@ -387,54 +386,52 @@ def calculate_sharpe_ratio(returns):
         
     return sharpe
 
-def optimize_lambda(training_window, validation_window, lambda_grid=None):
+def optimize_lambda(training_window, lambda_grid=None):
     """
-    Find optimal lambda that maximizes Sharpe ratio on validation set
+    Return a fixed lambda value since we're not using validation
     
     Parameters:
     -----------
     training_window : DataFrame
         Training window returns
-    validation_window : DataFrame
-        Validation window returns
     lambda_grid : array-like, optional
-        Grid of lambda values to try
+        Grid of lambda values to try (not used)
         
     Returns:
     --------
     optimal_lambda : float
-        Lambda value that maximizes Sharpe ratio
+        Fixed lambda value
     shrinkage_intensity : float
         The Ledoit-Wolf shrinkage intensity used for the covariance matrix.
     """
-    # Instead of optimizing, use fixed lambda value
+    # Use fixed lambda value since we don't have validation data
     fixed_lambda = 0.01
-    print(f"Using fixed lambda value of {fixed_lambda} instead of optimizing")
+    print(f"Using fixed lambda value of {fixed_lambda} (no validation data)")
     
     # Apply Ledoit-Wolf shrinkage to get covariance matrix and intensity
     _, shrinkage_intensity = ledoit_wolf_shrinkage(training_window)
     
     return fixed_lambda, shrinkage_intensity
 
-def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfolios=10):
+def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfolios=5):
     """
-    Run the factor timing optimization for specified windows using top 5 equal-weighted portfolios
+    Run the factor timing optimization for specified windows using top portfolios with equal weights
     
     Parameters:
     -----------
     rolling_data : dict
-        Dictionary with training, validation, and testing windows
+        Dictionary with training and testing windows
     window_indices : list, optional
         Specific windows to process. If None, process all windows.
     max_portfolios : int
-        Number of top portfolios to select (default: 5)
+        Number of top portfolios to select (default: 10)
         
     Returns:
     --------
     results : dict
         Results of optimization
     """
-    print("Running top 5 equal-weighted portfolio selection...")
+    print(f"Running top {max_portfolios} equal-weighted portfolio selection...")
     start_time = time.time()
     
     total_windows = len(rolling_data['training_windows'])
@@ -450,7 +447,6 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         'window_indices': window_indices,
         'portfolio_weights': {},
         'training_sharpe': {},
-        'validation_sharpe': {},
         'test_returns': {},
         'test_sharpe': {},
         'window_dates': {},
@@ -472,7 +468,6 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         
         # Get data for this window
         original_training_window = rolling_data['training_windows'][i]
-        validation_window = rolling_data['validation_windows'][i]
         testing_window = rolling_data['testing_windows'][i]
         
         # Store all portfolio names before filtering
@@ -481,20 +476,16 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         # Print window dates
         train_start = rolling_data['window_dates'][i]['train_start']
         train_end = rolling_data['window_dates'][i]['train_end']
-        val_start = rolling_data['window_dates'][i]['val_start']
-        val_end = rolling_data['window_dates'][i]['val_end']
         test_start = rolling_data['window_dates'][i]['test_start']
         test_end = rolling_data['window_dates'][i]['test_end']
         
         print(f"Training period:   {train_start} to {train_end}")
-        print(f"Validation period: {val_start} to {val_end}")
         print(f"Test period:       {test_start} to {test_end}")
         
-        # Select top 5 portfolios based on training returns
+        # Select top portfolios based on training returns
         training_window = select_top_portfolios(original_training_window, n=max_portfolios)
-        # Select same portfolios for validation and testing
+        # Select same portfolios for testing
         selected_columns = training_window.columns
-        validation_window = validation_window[selected_columns]
         testing_window = testing_window[selected_columns]
         
         # Store selected portfolio columns
@@ -513,23 +504,19 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         # Calculate performance metrics
         print("Calculating performance metrics...")
         train_returns = calculate_portfolio_return(weights, training_window, all_portfolio_names)
-        valid_returns = calculate_portfolio_return(weights, validation_window, all_portfolio_names)
         test_returns = calculate_portfolio_return(weights, testing_window, all_portfolio_names)
         
         # Calculate Sharpe ratios
         train_sharpe = calculate_sharpe_ratio(train_returns)
-        valid_sharpe = calculate_sharpe_ratio(valid_returns)
         test_sharpe = calculate_sharpe_ratio(test_returns)
         
         results['training_sharpe'][i] = train_sharpe
-        results['validation_sharpe'][i] = valid_sharpe
         results['test_returns'][i] = test_returns
         results['test_sharpe'][i] = test_sharpe
         
         window_elapsed_time = time.time() - window_start_time
         print(f"\nWindow {i+1} Results (completed in {window_elapsed_time:.2f} seconds):")
         print(f"  Training Sharpe:   {train_sharpe:.4f}")
-        print(f"  Validation Sharpe: {valid_sharpe:.4f}")
         print(f"  Test Sharpe:       {test_sharpe:.4f}")
     
     # Calculate overall out-of-sample Sharpe ratio
@@ -665,7 +652,7 @@ def find_window_by_year(window_dates, target_year=2010):
     return closest_idx
 
 def main():
-    """Main function to run top 10 equal-weighted portfolio selection"""
+    """Main function to run top 5 equal-weighted portfolio selection"""
     args = parse_arguments()
     
     # Load rolling windows data
@@ -679,13 +666,13 @@ def main():
         print("No windows to process. Exiting.")
         return
     
-    print(f"Processing {len(window_indices)} windows using top 10 equal-weighted portfolios...")
+    print(f"Processing {len(window_indices)} windows using top 5 equal-weighted portfolios...")
     
-    # Process top 10 equal-weighted portfolio selection
+    # Process top 5 equal-weighted portfolio selection
     results = run_factor_timing_optimization(
         rolling_data,
         window_indices=window_indices,
-        max_portfolios=10  # Fixed to always use top 10 portfolios
+        max_portfolios=5  # Fixed to always use top 5 portfolios
     )
     
     # Save results
@@ -693,7 +680,7 @@ def main():
     with open(args.output_file, 'wb') as f:
         pickle.dump(results, f)
     
-    print("Top 10 equal-weighted portfolio selection completed successfully.")
+    print("Top 5 equal-weighted portfolio selection completed successfully.")
 
 if __name__ == "__main__":
     main()

@@ -10,19 +10,17 @@
 # OUTPUT FILES:
 # - rolling_windows.pkl: Dictionary containing:
 #   - training_windows: List of DataFrames with 60-month training windows
-#   - validation_windows: List of DataFrames with 12-month validation windows
 #   - testing_windows: List of DataFrames with 1-month testing windows
 #   - window_dates: Dictionary with start/end dates for each window
 #
 # This script implements Phase 2.1 of the factor timing methodology:
 # 1. Creates 60-month rolling windows for model training
-# 2. Creates 12-month validation windows for hyperparameter tuning (lambda)
-# 3. Creates 1-month windows for out-of-sample testing
-# 4. Ensures proper time series partitioning (no look-ahead bias)
-# 5. Implements basic statistical filtering of factor timing portfolios
+# 2. Creates 1-month windows for out-of-sample testing (directly following training)
+# 3. Ensures proper time series partitioning (no look-ahead bias)
+# 4. Implements basic statistical filtering of factor timing portfolios
 #
 # Author: Claude
-# Last Updated: May 5, 2025
+# Last Updated: May 9, 2025
 """
 
 import pandas as pd
@@ -66,20 +64,19 @@ def load_data(input_file):
 
 # Filtering function removed - will be handled in the next step
 
-def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
+def create_rolling_windows(data, train_size=60, test_size=1):
     """
-    Create rolling windows for training, validation, and testing
+    Create rolling windows for training and testing
     
     Args:
         data (dict): Dictionary containing preprocessed data
         train_size (int): Size of training window in months
-        val_size (int): Size of validation window in months
         test_size (int): Size of testing window in months
         
     Returns:
-        dict: Dictionary containing training, validation, and testing windows
+        dict: Dictionary containing training and testing windows
     """
-    print(f"Creating {train_size}-month training, {val_size}-month validation, and {test_size}-month testing windows...")
+    print(f"Creating {train_size}-month training and {test_size}-month testing windows...")
     
     # Extract data
     factor_timing = data['factor_timing']
@@ -90,7 +87,6 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
     
     # Initialize lists to store windows
     training_windows = []
-    validation_windows = []
     testing_windows = []
     eval_windows = []
     window_dates = {}
@@ -98,8 +94,8 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
     # Create rolling windows
     n_windows = 0
     
-    # Need enough data for training + validation + testing
-    total_window_size = train_size + val_size + test_size
+    # Need enough data for training + testing
+    total_window_size = train_size + test_size
     
     for i in range(len(dates) - total_window_size + 1):
         # Get training window
@@ -107,26 +103,20 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
         train_end = dates[i + train_size - 1]
         train_data = factor_timing.loc[train_start:train_end]
         
-        # Get validation window (for determining optimal lambda)
-        val_start = dates[i + train_size]
-        val_end = dates[i + train_size + val_size - 1]
-        val_data = factor_timing.loc[val_start:val_end]
-        
-        # Get testing window (for final evaluation)
-        test_start = dates[i + train_size + val_size]
-        test_end = dates[i + train_size + val_size + test_size - 1]
+        # Get testing window (directly after training)
+        test_start = dates[i + train_size]
+        test_end = dates[i + train_size + test_size - 1]
         test_data = factor_timing.loc[test_start:test_end]
         
         # Get evaluation window (factor returns for the test period)
         eval_data = factor_returns.loc[test_start:test_end]
         
         # Skip if we have insufficient data
-        if len(train_data) < train_size or len(val_data) < val_size or len(test_data) < test_size:
+        if len(train_data) < train_size or len(test_data) < test_size:
             continue
             
         # Store windows
         training_windows.append(train_data)
-        validation_windows.append(val_data)
         testing_windows.append(test_data)
         eval_windows.append(eval_data)
         
@@ -134,8 +124,6 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
         window_dates[n_windows] = {
             'train_start': train_start,
             'train_end': train_end,
-            'val_start': val_start,
-            'val_end': val_end,
             'test_start': test_start,
             'test_end': test_end
         }
@@ -147,7 +135,6 @@ def create_rolling_windows(data, train_size=60, val_size=12, test_size=1):
     # Return results
     return {
         'training_windows': training_windows,
-        'validation_windows': validation_windows,
         'testing_windows': testing_windows,
         'evaluation_windows': eval_windows,
         'window_dates': window_dates,
@@ -165,8 +152,8 @@ def main():
     if data is None:
         return
     
-    # Create rolling windows with validation period
-    windows = create_rolling_windows(data, train_size=60, val_size=12, test_size=1)
+    # Create rolling windows without validation period
+    windows = create_rolling_windows(data, train_size=60, test_size=1)
     
     # Save results
     with open(OUTPUT_FILE, 'wb') as f:
@@ -185,14 +172,13 @@ def main():
     
     # Calculate data usage
     train_months = 60
-    val_months = 12
     test_months = 1
     total_periods = len(data['factor_returns'])
-    usable_periods = total_periods - (train_months + val_months + test_months) + 1
+    usable_periods = total_periods - (train_months + test_months) + 1
     
     print(f"Total data periods: {total_periods} months")
     print(f"Usable for rolling windows: {usable_periods} months")
-    print(f"Window structure: {train_months}m train + {val_months}m validation + {test_months}m test")
+    print(f"Window structure: {train_months}m train + {test_months}m test")
     
     print("\nPhase 2.1 (Rolling Windows) completed successfully.")
     print("Ready to begin Phase 2.2 (Covariance Shrinkage Estimation)")

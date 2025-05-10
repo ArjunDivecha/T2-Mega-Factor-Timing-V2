@@ -119,17 +119,17 @@ def find_windows_by_date_range(rolling_data, start_date, end_date):
     return window_indices
 
 def find_window_by_year(window_dates, target_year=2010):
-    """Find window index where validation period includes the target year"""
+    """Find window index where test period includes the target year"""
     for idx, dates in window_dates.items():
-        val_end_year = pd.to_datetime(dates['val_end']).year
-        if val_end_year == target_year:
+        test_year = pd.to_datetime(dates['test_start']).year
+        if test_year == target_year:
             return [idx]
     
     # If exact year not found, find closest
     closest_idx = None
     min_diff = float('inf')
     for idx, dates in window_dates.items():
-        diff = abs(pd.to_datetime(dates['val_end']).year - target_year)
+        diff = abs(pd.to_datetime(dates['test_start']).year - target_year)
         if diff < min_diff:
             min_diff = diff
             closest_idx = idx
