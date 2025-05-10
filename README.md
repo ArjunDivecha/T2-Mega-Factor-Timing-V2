@@ -1,84 +1,106 @@
-# Factor Timing Framework
+# T2 MEGA FACTOR TIMING V2
 
-A comprehensive framework for implementing and testing factor timing strategies, with proper handling of Cross-Sectional (CS) and Time-Series (TS) factors.
+A comprehensive framework for implementing and testing factor timing strategies with a focus on selecting the top 5 performing factors and equal-weighting them. This pipeline handles Cross-Sectional (CS) and Time-Series (TS) factors separately.
 
 ## Overview
 
-The framework implements a robust factor timing methodology for financial markets, focusing on the top 5 performing portfolios with equal weighting (20% each). It includes factor rotation and comprehensive performance evaluation, analyzing both Cross-Sectional (CS) and Time-Series (TS) factors to identify the most effective combinations for portfolio construction.
+This framework implements a factor timing methodology designed to identify and weight the most promising factor timing portfolios. The pipeline selects the top 5 best-performing portfolios from historical data and assigns equal weights (20% each), then evaluates performance directly on the next month without using a validation window. The complete pipeline includes data preparation, rolling window construction, portfolio selection, factor rotation, and comprehensive performance analysis.
 
 ## Key Features
 
-- Analyzes 102 factors (49 cross-sectional and 53 time-series variants)
-- Applies optimal regularization via shrinkage techniques
-- Implements factor rotation to identify the most important factors
-- Supports long-short and long-only constraints
+- Selects top 5 best-performing factor timing portfolios based on training data
+- Assigns equal weights (20% each) to selected portfolios
+- Uses 60-month training windows and 1-month direct testing (no validation window)
+- Supports analysis of conditioning variables' importance
+- Analyzes both Cross-Sectional (CS) and Time-Series (TS) factors
 - Provides comprehensive performance metrics and visualizations
-- Maintains consistent separation between CS and TS factors
-- Handles rolling window analysis for proper out-of-sample testing
 
-## Workflow
+## Pipeline Steps
 
-The complete workflow consists of the following steps:
+The complete pipeline consists of the following steps:
 
-1. **Data Preparation**:
-   ```
-   python factor_timing_data_prep.py
-   ```
-   Loads the raw factor and conditioning variable data, prepares factor timing portfolios by combining factors with lagged predictors, and saves to `prepared_data.pkl`.
+### Step 0: Delete Output Files
 
-2. **Create Rolling Windows**:
-   ```
-   python Step_2_rolling_windows.py
-   ```
-   Constructs rolling windows for training (60 months) and testing (1 month) periods, saving the result to `rolling_windows.pkl`. Note that the validation window step has been eliminated to directly test on the next month after training.
+```bash
+python Step_0_Delete_Output.py
+```
+Cleans up any existing output files to ensure a fresh run of the pipeline.
 
-3. **Run Shrinkage Optimization**:
-   ```
-   python Step_3_shrinkage_TOP5.py [options]
-   ```
-   Selects the top 5 best performing portfolios based on training data and assigns equal weights (20% each). Uses a fixed lambda parameter without validation-based optimization and saves results to `shrinkage_results.pkl`.
+### Step 1: Data Preparation
 
-4. **Extract Shrinkage Intensities**:
-   ```
-   python print_intensities.py
-   ```
-   Analyzes and displays the Ledoit-Wolf shrinkage intensities from the optimization results, showing how the covariance structure stability evolves across windows.
+```bash
+python Step_1_data_prep.py
+```
+Loads and preprocesses raw factor data, conditioning variables, and creates factor timing portfolios. The output is saved to `prepared_data.pkl`.
 
-5. **Extract Optimal Weights**:
-   ```
-   python Step_4_extract_weights.py
-   ```
-   Extracts the optimal weights for top 5 timing portfolios from shrinkage results and saves them to `unrotated_optimal_weights.xlsx` for further analysis.
+Alternative versions are available for specialized data preparation:
+- `Step_1_data_prep_T60.py`: 60-month training window version
+- `Step_1_data_prep_Bloom.py`: Bloomberg data version
 
-6. **Process Factor Rotation**:
-   ```
-   python Step_5_factor_rotation.py [options]
-   ```
-   Rotates portfolio weights from the top 5 portfolios into factor weights, properly preserving CS and TS factor designations, saving to `rotated_optimal_weights.xlsx`.
+### Step 2: Create Rolling Windows
 
-7. **Run Complete Test Pipeline**:
-   ```
-   python Step_6_Prep_Output.py [options]
-   ```
-   Executes the full pipeline end-to-end, calculating comprehensive performance metrics, saving detailed results to `test_results.pkl` and `factor_timing_results.xlsx`. Can use existing shrinkage results without rerunning optimization.
+```bash
+python Step_2_rolling_windows.py
+```
+Constructs rolling windows for training (60 months) and testing (1 month) periods. Unlike previous versions, this implementation doesn't use a validation window and instead directly tests on the next month after training. Results are saved to `rolling_windows.pkl`.
 
-8. **Generate Plots**:
-   ```
-   python Step_7_plot_results.py [options]
-   ```
-   Creates visualizations from test results without rerunning the entire pipeline, including lambda evolution, Sharpe ratios, cumulative returns, drawdowns, and factor weights.
+### Step 3: Portfolio Selection and Weight Optimization
 
-9. **Analyze Factor Weights**:
-   ```
-   python Step_8_analyze_weights.py
-   ```
-   Provides in-depth analysis of factor weights from the top 5 portfolios, including CS vs TS distribution and comparative performance.
-   
-10. **Analyze Conditioning Variables**:
-   ```
-   python Step_10_analyze_conditioning_variables.py
-   ```
-   Analyzes which conditioning variables were most important at different points in time by examining the unrotated optimal weights from the top 5 portfolios.
+```bash
+python Step_3_shrinkage_TOP5.py [options]
+```
+Selects the top 5 best-performing portfolios based on training data and assigns equal weights (20% each) to these portfolios. This script uses a fixed lambda parameter instead of validation-based optimization. Results are saved to `shrinkage_results.pkl`.
+
+Options include:
+- `--max_windows N`: Maximum number of windows to process (0 for all)
+- `--window_indices INDICES`: Specific window indices to process
+
+### Step 4: Extract Portfolio Weights
+
+```bash
+python Step_4_extract_weights.py
+```
+Extracts the portfolio weights from the shrinkage results file and saves them to `unrotated_optimal_weights.xlsx` for further analysis.
+
+### Step 5: Factor Rotation
+
+```bash
+python Step_5_factor_rotation.py
+```
+Rotates the portfolio weights back to the original factor space, properly accounting for CS and TS factor designations. The rotated weights are saved to `rotated_optimal_weights.xlsx`.
+
+### Step 6: Prepare Output and Performance Metrics
+
+```bash
+python Step_6_Prep_Output.py [options]
+```
+Generates comprehensive performance metrics, summary tables, and exports results to `factor_timing_results.xlsx` and `test_results.pkl`. This script integrates the outputs from previous steps and presents them in a structured format.
+
+### Step 7: Plot Results
+
+```bash
+python Step_7_plot_results.py
+```
+Creates visualizations from the test results, including performance charts, metrics evolution, and factor weight distributions.
+
+### Step 8: Analyze Factor Weights
+
+```bash
+python Step_8_analyze_weights.py
+```
+Provides detailed analysis of factor weights from the top 5 portfolios, including:
+- Distribution between CS and TS factors
+- Top factors by weight
+- CS vs TS comparative performance
+
+### Step 10: Analyze Conditioning Variables
+
+```bash
+python Step_10_analyze_conditioning_variables.py
+```
+Analyzes which conditioning variables (like GDP, inflation, etc.) were most important at different points in time based on the unrotated weights. Generates visualizations of conditioning variable importance and their time series evolution.
+
+*Note: There is no Step 9 in the current pipeline implementation.*
 
 ## Command-Line Interface
 
