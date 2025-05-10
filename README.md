@@ -104,28 +104,21 @@ Analyzes which conditioning variables (like GDP, inflation, etc.) were most impo
 
 ## Command-Line Interface
 
-All scripts use a consistent command-line interface, allowing you to specify window parameters in the same way across all components.
+Many scripts in the pipeline support a consistent command-line interface for specifying which windows to process.
 
 ### Common Parameters
 
-All scripts support the following parameters:
+Supported parameters in applicable scripts include:
 
 ```
 --window_indices INDICES   Specific window indices to process, comma-separated (e.g., "120,121,122")
 --start_date DATE          Start date for test period (YYYY-MM-DD)
 --end_date DATE            End date for test period (YYYY-MM-DD)
 --max_windows N            Maximum number of windows to process (default: 5, 0 for all windows)
---max_portfolios N         Maximum number of portfolios to analyze (default: 2000)
---find_2010_window         Find and process window around 2010
+--lambda_value LAMBDA      Fixed shrinkage intensity to use (where applicable)
 ```
 
-Additionally, `run_factor_timing_test.py` supports these parameters:
-
-```
---run_shrinkage            Force rerunning shrinkage optimization even if results exist
---export_excel             Export results to Excel (default: True if not already exists)
---export_plots             Export plots to PDF files (default: True)
-```
+Specific scripts may support additional parameters as needed for their functionality.
 
 **Note**: The parameters `--window_indices`, `--start_date/--end_date`, and `--find_2010_window` are mutually exclusive. If none are provided, the script will process up to `max_windows` most recent windows.
 
@@ -146,184 +139,115 @@ Additionally, `run_factor_timing_test.py` supports these parameters:
    python run_factor_timing_test.py --max_windows 0
    ```
 
-4. Generate only plots from existing results:
-   ```
-   python plot_factor_results.py
-   ```
+## Input Data Requirements
 
-## Input Files
+The pipeline requires the following input data:
 
-- **T2 Mega Factor Conditioning Variables.xlsx**: Primary input file containing:
-  - Factor returns data (CS and TS variants)
-  - Conditioning variables (macro predictors)
-  - Historical performance data
+- **Factor returns data**: Monthly returns for various investment factors, including both CS and TS variants
+- **Conditioning variables**: Macroeconomic indicators and market signals (GDP, inflation, volatility indices, etc.)
+- **Historical performance data**: Benchmark performance metrics for comparison
+
+The data files should be placed in the appropriate directory structure as expected by the data preparation scripts.
 
 ## Output Files
-
-- **prepared_data.pkl**: Preprocessed factor timing data with standardized conditioning variables
-- **rolling_windows.pkl**: Rolling window splits for time series analysis (train/test)
-- **shrinkage_results.pkl**: Results from shrinkage optimization, including optimal lambda values
-- **factor_weights.pkl**: Factor weights data with proper CS/TS designations
-- **test_results.pkl**: Complete test results and performance metrics
-- **factor_timing_results.xlsx**: Excel file with detailed results and statistics including:
-  - Performance Summary sheet
-  - Window Details sheet
-  - Long-Only Weights sheet
-  - Long-Short Weights sheet
-
-### Generated Visualizations
-
-- **lambda_plot.pdf**: Evolution of lambda values over time
-- **sharpe_plot.pdf**: Evolution of Sharpe ratios over time
-- **cumulative_plot.pdf**: Cumulative returns comparison
-- **drawdown_plot.pdf**: Drawdown comparison
-- **factor_weights_long_short.pdf**: Long-short factor weights over time
-- **factor_weights_with_long_only_constraint.pdf**: Long-only factor weights over time
-- **cs_vs_ts_allocation.pdf**: Distribution of allocation between CS and TS factors
-
-## Comprehensive Output Files Reference
-
-The factor timing framework generates multiple output files at each stage of processing. Here's a detailed breakdown of all output files and their contents:
 
 ### Data Processing Files
 
 1. **prepared_data.pkl**
-   - Contains all preprocessed data needed for the factor timing model
-   - **factor_returns**: Original factor returns data (76 factors, cleaned and scaled)
-   - **macro_vars_std**: Standardized macroeconomic and technical conditioning variables
-   - **trailing_*MTR**: Trailing returns at different time horizons for each factor
-   - **factor_timing**: ~30,000 factor timing portfolios (cross-products of factors and predictors)
-   - Format: Python pickle (dictionary of pandas DataFrames)
+   - Contains all preprocessed data for the factor timing model
+   - Includes factor returns, portfolio mappings, conditioning variables
+   - Format: Python pickle (dictionary of DataFrames)
 
 2. **rolling_windows.pkl**
-   - Contains time-series partitioned data for model training and evaluation
-   - **training_windows**: List of 60-month windows for model training
-   - **validation_windows**: List of 12-month windows for hyperparameter tuning
-   - **testing_windows**: List of 1-month windows for out-of-sample evaluation
-   - **window_dates**: Dictionary mapping window indices to their date ranges
-   - **filtered_portfolios**: List of ~372 statistically significant portfolios
-   - Format: Python pickle (dictionary of lists and DataFrames)
+   - Contains the rolling window definitions
+   - **train_indices**: Training window indices (60 months per window)
+   - **test_indices**: Test window indices (1 month per window)
+   - **train_dates**: Corresponding dates for training periods
+   - **test_dates**: Corresponding dates for test periods
+   - Format: Python pickle (dictionary)
 
 ### Optimization and Weight Files
 
 3. **shrinkage_results.pkl**
-   - Contains complete results from the shrinkage optimization process
+   - Results from the top 5 portfolio selection process
    - **window_indices**: List of processed window indices
-   - **optimal_lambdas**: Optimal lambda values for each window
-   - **portfolio_weights**: Optimized weights for filtered portfolios
-   - **training_sharpe**: In-sample Sharpe ratios
-   - **validation_sharpe**: Validation period Sharpe ratios
-   - **test_sharpe**: Out-of-sample Sharpe ratios
-   - **shrinkage_intensities**: Ledoit-Wolf shrinkage intensity (δ*) values
-   - **test_returns**: Portfolio returns in testing periods
-   - Format: Python pickle (dictionary of arrays and scalars)
+   - **selected_portfolios**: Top 5 portfolios selected for each window
+   - **train_sharpes**: Training Sharpe ratios for selected portfolios
+   - **test_sharpes**: Test Sharpe ratios for evaluation
+   - **optimal_weights**: Equal weights (20%) assigned to selected portfolios
+   - Format: Python pickle (nested dictionaries)
 
 4. **unrotated_optimal_weights.xlsx**
-   - Contains optimal weights for the filtered factor timing portfolios
-   - Rows: ~372 filtered timing portfolios
+   - Contains the equal weights (20%) for the top 5 selected portfolios
+   - Rows: Selected portfolios
    - Columns: Test dates (window end dates)
-   - Values: Optimal portfolio weights from shrinkage optimization
-   - Format: Excel spreadsheet (single sheet)
+   - Values: Fixed 20% weights for selected portfolios, 0% for others
+   - Format: Excel spreadsheet
 
 5. **rotated_optimal_weights.xlsx**
-   - Contains optimal weights rotated back to original factors
-   - Rows: ~76 original factors
-   - Columns: Test dates (window end dates)
-   - Values: Aggregated weights per original factor
-   - Format: Excel spreadsheet (single sheet)
-
-6. **factor_weights.pkl**
-   - Complete factor rotation results with long-short and long-only constraints
-   - **window_indices**: List of processed window indices
-   - **factor_weights**: Long-short factor weights for each window
-   - **long_only_weights**: Factor weights with long-only constraint applied
-   - **factor_names**: List of unique factor names
-   - **window_dates**: Dictionary mapping window indices to their date ranges
-   - Format: Python pickle (dictionary of arrays and metadata)
+   - Contains weights rotated back to original factor space
+   - Rows: Original factors (CS and TS variants)
+   - Columns: Test dates
+   - Values: Derived weights for each original factor
+   - Format: Excel spreadsheet
 
 ### Results and Analysis Files
 
-7. **test_results.pkl**
-   - Comprehensive test results from the complete pipeline
-   - **factor_weights**: Long-short factor weights
-   - **long_only_weights**: Long-only factor weights
-   - **window_dates**: Date information for each window
-   - **strategy_returns**: Time series of strategy returns
-   - **benchmark_returns**: Time series of benchmark returns
-   - **performance_metrics**: Sharpe, volatility, returns, drawdowns, etc.
-   - **lambda_values**: Regularization parameters used
-   - **cs_vs_ts_allocation**: Allocation breakdown by factor type
-   - Format: Python pickle (nested dictionaries of results)
+6. **test_results.pkl**
+   - Comprehensive performance results and metrics
+   - **strategy_returns**: Historical returns series
+   - **performance_metrics**: Performance statistics (Sharpe, returns, volatility)
+   - **cumulative_returns**: Cumulative return series
+   - **selected_portfolios**: Record of which portfolios were selected
+   - Format: Python pickle (nested dictionaries)
 
-8. **factor_timing_results.xlsx**
-   - Consolidated results formatted for analysis and presentation
-   - **Performance Summary**: Overall metrics (returns, Sharpe, volatility, drawdowns)
-   - **Window Details**: Lambda, shrinkage intensity, and metrics per window
-   - **Long-Only Weights**: Factor weights with long-only constraint
-   - **Long-Short Weights**: Unconstrained factor weights
-   - **Plots Guide**: Information about generated visualizations
-   - Format: Excel workbook (multiple sheets)
+7. **factor_timing_results.xlsx**
+   - Consolidated results for analysis
+   - **Performance Summary**: Overall metrics 
+   - **Monthly Returns**: Month-by-month returns
+   - **Window Analysis**: Per-window performance
+   - **Factor Weights**: Factor weight evolution
+   - **CS vs TS Analysis**: Factor type breakdown
+   - Format: Excel spreadsheet (multiple sheets)
 
-### Visualization Files
+### Analysis Outputs
 
-9. **lambda_plot.pdf**
-   - Time series plot showing the evolution of optimal lambda values
-   - X-axis: Window dates
-   - Y-axis: Lambda values (regularization strength)
-   - Format: PDF visualization
+8. **Weight Analysis Directory**
+   - Various visualizations and analysis of factor weights
+   - CS vs TS distribution charts
+   - Top factor analysis
+   - Comparative performance metrics
+   - Format: PDF files and Excel reports
 
-10. **sharpe_plot.pdf**
-    - Comparison of Sharpe ratios across different optimization stages
-    - Shows training, validation, and test Sharpe ratios
-    - Format: PDF visualization
-
-11. **cumulative_plot.pdf**
-    - Cumulative returns of the factor timing strategy vs benchmark
-    - X-axis: Time
-    - Y-axis: Cumulative return (1 + r)
-    - Format: PDF visualization
-
-12. **drawdown_plot.pdf**
-    - Maximum drawdowns of the strategy and benchmark
-    - Shows portfolio value decline from previous peaks
-    - Format: PDF visualization
-
-13. **factor_weights_long_short.pdf**
-    - Time series plot of long-short factor weights
-    - Shows how weights for top factors evolve over time
-    - Format: PDF visualization
-
-14. **factor_weights_with_long_only_constraint.pdf**
-    - Time series plot of long-only factor weights
-    - Shows evolution of implementable weights over time
-    - Format: PDF visualization
-
-15. **cs_vs_ts_allocation.pdf**
-    - Pie chart showing allocation between Cross-Sectional and Time-Series factors
-    - Comparative analysis of CS vs TS factor performance
-    - Format: PDF visualization
+9. **Conditioning Variable Analysis Directory**
+   - Analysis of conditioning variable importance
+   - Heatmaps of variable importance over time
+   - Top conditioning variables by factor
+   - Time series plots of variable importance
+   - Format: PDF files and Excel reports
 
 ## Cross-Sectional vs Time-Series Factors
 
-This framework carefully maintains the distinction between Cross-Sectional (CS) and Time-Series (TS) factors:
+The pipeline maintains a clear distinction between Cross-Sectional (CS) and Time-Series (TS) factors throughout processing:
 
-- **Cross-Sectional (CS)**: Factors based on the relative performance of securities within the same time period
-- **Time-Series (TS)**: Factors based on the performance of securities relative to their own history
+- **Cross-Sectional (CS)**: Factors that compare securities against each other at the same point in time
+- **Time-Series (TS)**: Factors that compare a security's current values against its own historical values
 
-Analysis of CS vs TS factor performance reveals:
-- Distribution between CS (42%) and TS (58%) factors in optimal portfolios
-- Some factors perform better in CS form (e.g., Best ROE, 12MTR, Debt to EV)
-- Others perform better in TS form (e.g., 12-1MTR, Inflation, 10Yr Bond)
+The Step_8_analyze_weights.py script provides detailed analysis of CS vs TS performance, showing:
+- The distribution between CS and TS factors in the selected portfolios
+- Which factors perform better in their CS or TS implementations
+- How this distribution evolves over time
 
 ## Performance Metrics
 
-The framework calculates and reports comprehensive performance metrics including:
+The pipeline calculates and reports the following performance metrics:
 - Annualized returns
 - Annualized volatility
 - Sharpe ratio
 - Maximum drawdown
-- Win rate
-- Portfolio turnover
+- Win rate (% of months with positive returns)
+- Monthly return statistics
+- Comparison against benchmark performance
 
 ## Technical Requirements
 
@@ -331,108 +255,116 @@ The framework calculates and reports comprehensive performance metrics including
 - NumPy
 - Pandas
 - Matplotlib
+- Seaborn
 - SciPy
-- Joblib (for parallelization)
+- scikit-learn (for machine learning components)
+- Joblib (for parallelization where applicable)
+- openpyxl (for Excel file handling)
 
 ## Project Structure
 
-The implementation follows a multi-phase approach:
+The implementation follows a sequential pipeline approach with numbered steps:
 
-### Phase 1: Data Preparation
-- Script: `factor_timing_data_prep.py`
-- Loads raw data and creates factor timing portfolios
+### Step 0-1: Preparation Phase
+- Scripts: `Step_0_Delete_Output.py`, `Step_1_data_prep.py`
+- Prepare the environment and preprocess raw data
 
-### Phase 2: Rolling Windows
-- Script: `factor_timing_rolling_windows.py`
-- Creates rolling window splits for proper time series validation
+### Step 2-3: Window Creation and Portfolio Selection
+- Scripts: `Step_2_rolling_windows.py`, `Step_3_shrinkage_TOP5.py`
+- Create time windows and select top 5 portfolios
 
-### Phase 3: Shrinkage Optimization
-- Script: `factor_timing_shrinkage.py`
-- Optimizes portfolio weights with regularization
+### Step 4-5: Weight Extraction and Factor Rotation
+- Scripts: `Step_4_extract_weights.py`, `Step_5_factor_rotation.py`
+- Extract and transform portfolio weights
 
-### Phase 4: Factor Rotation
-- Script: `factor_rotation.py`
-- Rotates portfolio weights to interpretable factor weights
+### Step 6-8: Analysis and Visualization
+- Scripts: `Step_6_Prep_Output.py`, `Step_7_plot_results.py`, `Step_8_analyze_weights.py`
+- Generate performance metrics and visualizations
 
-### Phase 5: Performance Evaluation
-- Scripts: `run_factor_timing_test.py` and `plot_factor_results.py`
-- Calculates performance metrics and generates visualizations
+### Step 10: Conditioning Variable Analysis
+- Script: `Step_10_analyze_conditioning_variables.py`
+- Analyze the importance of conditioning variables
 
 ## Running the Complete Pipeline Step by Step
 
-To run the entire factor timing pipeline for all available windows, follow these steps:
+To run the entire factor timing pipeline, follow these steps in order:
 
-### 1. Data Preparation
+### Step 0: Clean Up Previous Outputs
+```bash
+python Step_0_Delete_Output.py
 ```
-python factor_timing_data_prep.py
-```
-This loads the raw factor and conditioning variable data and prepares factor timing portfolios.
+This removes any existing output files to ensure a clean run.
 
-### 2. Generate Rolling Windows
+### Step 1: Data Preparation
+```bash
+python Step_1_data_prep.py
 ```
-python factor_timing_rolling_windows.py
-```
-This creates rolling windows for training and testing periods (without validation).
+This preprocesses the raw factor data and conditioning variables.
 
-### 3. Run Shrinkage Optimization for All Windows
+### Step 2: Generate Rolling Windows
+```bash
+python Step_2_rolling_windows.py
 ```
+This creates the training (60 months) and testing (1 month) windows.
+
+### Step 3: Select Top 5 Portfolios
+```bash
 python Step_3_shrinkage_TOP5.py --max_windows 0
 ```
-The `--max_windows 0` parameter processes all available windows. This is the most time-consuming step.
+This selects the top 5 portfolios based on training data and assigns 20% weight to each. The `--max_windows 0` parameter processes all available windows.
 
-### 4. Extract Portfolio Weights
-```
+### Step 4: Extract Portfolio Weights
+```bash
 python Step_4_extract_weights.py
 ```
-This extracts the optimal weights from the shrinkage results.
+This extracts the weights (20% each) for the selected top 5 portfolios.
 
-### 5. Perform Factor Rotation
-```
+### Step 5: Perform Factor Rotation
+```bash
 python Step_5_factor_rotation.py
 ```
-This rotates portfolio weights into factor weights.
+This rotates the portfolio weights back to original factor space.
 
-### 6. Generate Performance Metrics and Visualizations
-```
+### Step 6: Generate Performance Metrics
+```bash
 python Step_6_Prep_Output.py --max_windows 0
 ```
-This processes all windows and generates performance metrics. The script will automatically use the existing shrinkage results without rerunning the optimization.
+This calculates performance metrics and produces the main results files.
 
-If you want to force rerunning the shrinkage optimization:
-```
-python run_factor_timing_test.py --max_windows 0 --run_shrinkage
-```
-
-### 7. Generate Additional Visualizations
-```
+### Step 7: Create Visualizations
+```bash
 python Step_7_plot_results.py
 ```
-This creates additional visualizations from the test results.
+This generates performance charts and visualizations.
 
-### 8. Analyze Weights
-```
+### Step 8: Analyze Factor Weights
+```bash
 python Step_8_analyze_weights.py
 ```
-This analyzes the weights from the top 5 portfolios.
+This analyzes the distribution and importance of factors in the selected portfolios.
 
-### 10. Analyze Conditioning Variables
-```
+### Step 10: Analyze Conditioning Variables
+```bash
 python Step_10_analyze_conditioning_variables.py
 ```
-This analyzes the importance of conditioning variables in the top 5 portfolios.
+This analyzes which conditioning variables had the most influence on portfolio selection.
+
+*Note: There is no Step 9 in the current implementation.*
 
 ## Recent Modifications
 
-### Enhanced Mean Returns Impact
+### Top 5 Portfolio Selection
 
-The `factor_timing_shrinkage.py` script has been modified to scale the mean returns vector by a factor of 10.0 in the `optimal_portfolio_weights` function. This emphasizes the impact of expected returns during portfolio optimization:
+The pipeline has been modified to select the top 5 performing portfolios instead of the previous top 10 approach. Each selected portfolio now receives an equal weight of 20%.
 
-```python
-# Adjust the impact of the mean returns vector
-return_multiplier = 10.0  # Adjust this value to control emphasis
-mu_hat = mu_hat * return_multiplier
-```
+### Removal of Validation Window
 
-### Optimized Performance Analysis
+The validation window has been removed from the rolling window creation. The pipeline now directly tests on the next month after training, simplifying the process and reducing complexity.
 
-The `run_factor_timing_test.py` script has been modified to skip rerunning the time-consuming shrinkage optimization step when not needed. It now checks if the shrinkage results file exists and uses it directly unless the `--run_shrinkage` flag is specified.
+### Updated Testing Methodology
+
+The testing methodology has been streamlined to focus on direct evaluation of the top 5 portfolios without additional optimization steps.
+
+### Enhanced Analysis Components
+
+Additional analysis components have been added to provide deeper insights into factor weights (Step 8) and conditioning variable importance (Step 10).
