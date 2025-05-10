@@ -1,5 +1,5 @@
 """
-# Factor Timing Top 5 Implementation
+# Factor Timing Top 10 Implementation
 # 
 # INPUT FILES:
 # - rolling_windows.pkl: Dictionary containing training, validation, and testing windows
@@ -7,12 +7,12 @@
 #
 # OUTPUT FILES:
 # - shrinkage_results.pkl: Dictionary containing:
-#   - portfolio_weights: Equal weights (20%) for top 5 portfolios
+#   - portfolio_weights: Equal weights (10%) for top 10 portfolios
 #   - performance_metrics: Out-of-sample performance results
 #
 # This script implements a simplified factor timing methodology:
-# 1. Selects the top 5 best performing portfolios based on training data
-# 2. Assigns equal weights (20% each) to these 5 portfolios
+# 1. Selects the top 10 best performing portfolios based on training data
+# 2. Assigns equal weights (10% each) to these 10 portfolios
 # 3. Evaluates performance on validation and test windows
 #
 # Author: Claude
@@ -97,7 +97,7 @@ def clean_returns_data(returns):
     
     return cleaned_returns
 
-def select_top_portfolios(returns, n=5):
+def select_top_portfolios(returns, n=10):
     """
     Select top N portfolios based on trailing returns
     
@@ -140,7 +140,7 @@ def equal_weight_portfolios(returns, all_portfolio_names):
     Returns:
     --------
     weights : ndarray
-        Weights for all portfolios (20% each for selected portfolios, 0 for others)
+        Weights for all portfolios (10% each for selected portfolios, 0 for others)
     """
     selected_portfolios = returns.columns
     num_selected = len(selected_portfolios)
@@ -416,7 +416,7 @@ def optimize_lambda(training_window, validation_window, lambda_grid=None):
     
     return fixed_lambda, shrinkage_intensity
 
-def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfolios=5):
+def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfolios=10):
     """
     Run the factor timing optimization for specified windows using top 5 equal-weighted portfolios
     
@@ -635,7 +635,7 @@ def save_results(results, file_path=SHRINKAGE_RESULTS_FILE):
 
 def parse_arguments():
     """Parse command-line arguments"""
-    parser = add_common_args('Run top 5 equal-weighted portfolio selection')
+    parser = add_common_args('Run top 10 equal-weighted portfolio selection')
     
     # Additional script-specific arguments
     parser.add_argument('--output_file', type=str, default=SHRINKAGE_RESULTS_FILE,
@@ -665,7 +665,7 @@ def find_window_by_year(window_dates, target_year=2010):
     return closest_idx
 
 def main():
-    """Main function to run top 5 equal-weighted portfolio selection"""
+    """Main function to run top 10 equal-weighted portfolio selection"""
     args = parse_arguments()
     
     # Load rolling windows data
@@ -679,13 +679,13 @@ def main():
         print("No windows to process. Exiting.")
         return
     
-    print(f"Processing {len(window_indices)} windows using top 5 equal-weighted portfolios...")
+    print(f"Processing {len(window_indices)} windows using top 10 equal-weighted portfolios...")
     
-    # Process top 5 equal-weighted portfolio selection
+    # Process top 10 equal-weighted portfolio selection
     results = run_factor_timing_optimization(
         rolling_data,
         window_indices=window_indices,
-        max_portfolios=5  # Fixed to always use top 5 portfolios
+        max_portfolios=10  # Fixed to always use top 10 portfolios
     )
     
     # Save results
@@ -693,7 +693,7 @@ def main():
     with open(args.output_file, 'wb') as f:
         pickle.dump(results, f)
     
-    print("Top 5 equal-weighted portfolio selection completed successfully.")
+    print("Top 10 equal-weighted portfolio selection completed successfully.")
 
 if __name__ == "__main__":
     main()
