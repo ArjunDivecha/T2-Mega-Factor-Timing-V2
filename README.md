@@ -281,6 +281,10 @@ The implementation follows a sequential pipeline approach with numbered steps:
 - Scripts: `Step_6_Prep_Output.py`, `Step_7_plot_results.py`, `Step_8_analyze_weights.py`
 - Generate performance metrics and visualizations
 
+### Step 9-9.5: Country Weight Allocation and Performance Analysis
+- Scripts: `Step_9 Write Country Weights.py`, `Step_9.5 Calculate Portfolio Returns.py`
+- Convert feature weights to country weights and analyze resulting portfolio performance
+
 ### Step 10: Conditioning Variable Analysis
 - Script: `Step_10_analyze_conditioning_variables.py`
 - Analyze the importance of conditioning variables
@@ -343,13 +347,29 @@ python Step_8_analyze_weights.py
 ```
 This analyzes the distribution and importance of factors in the selected portfolios.
 
+### Step 9: Convert Feature Weights to Country Weights
+
+**⚠️ WARNING: Before running Step 9 and Step 9.5, ensure that the required files in `/Users/macbook2024/Dropbox/AAA Backup/Transformer/T2 Factor Timing/` are up-to-date. These scripts rely on external files from this directory.**
+
+```bash
+python "Step_9 Write Country Weights.py"
+```
+Converts feature importance weights from the factor timing model into country-specific investment weights for stock market forecasting. The script reads feature weights from the "Long-Only Weights" sheet in "factor_timing_results.xlsx" and distributes these weights to countries based on their factor values. Output is saved to "Final_Country_Weights.xlsx".
+
+### Step 9.5: Calculate Portfolio Returns
+
+```bash
+python "Step_9.5 Calculate Portfolio Returns.py"
+```
+Calculates and analyzes the performance of the country-weighted investment portfolio by applying country weights to historical returns data. Compares performance against an equal-weight benchmark and generates comprehensive performance metrics and visualizations. Output files include "Final_Portfolio_Returns.xlsx" and "Final_Portfolio_Returns.pdf".
+
 ### Step 10: Analyze Conditioning Variables
+
 ```bash
 python Step_10_analyze_conditioning_variables.py
 ```
 This analyzes which conditioning variables had the most influence on portfolio selection.
 
-*Note: There is no Step 9 in the current implementation.*
 
 ## Recent Modifications
 
