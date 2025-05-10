@@ -4,7 +4,7 @@ A comprehensive framework for implementing and testing factor timing strategies,
 
 ## Overview
 
-This framework implements a robust factor timing methodology for financial markets, allowing for the optimization of portfolio weights using shrinkage techniques, factor rotation, and comprehensive performance evaluation. It analyzes both Cross-Sectional (CS) and Time-Series (TS) factors to identify the most effective combinations for portfolio construction.
+The framework implements a robust factor timing methodology for financial markets, focusing on the top 5 performing portfolios with equal weighting (20% each). It includes factor rotation and comprehensive performance evaluation, analyzing both Cross-Sectional (CS) and Time-Series (TS) factors to identify the most effective combinations for portfolio construction.
 
 ## Key Features
 
@@ -28,15 +28,15 @@ The complete workflow consists of the following steps:
 
 2. **Create Rolling Windows**:
    ```
-   python factor_timing_rolling_windows.py
+   python Step_2_rolling_windows.py
    ```
-   Constructs rolling windows for training (60 months), validation (12 months), and testing (1 month) periods, saving the result to `rolling_windows.pkl`.
+   Constructs rolling windows for training (60 months) and testing (1 month) periods, saving the result to `rolling_windows.pkl`. Note that the validation window step has been eliminated to directly test on the next month after training.
 
 3. **Run Shrinkage Optimization**:
    ```
-   python factor_timing_shrinkage.py [options]
+   python Step_3_shrinkage_TOP5.py [options]
    ```
-   Optimizes portfolio weights using shrinkage techniques with Ledoit-Wolf covariance estimation, tuning the optimal lambda parameter for each window, and saving results to `shrinkage_results.pkl`.
+   Selects the top 5 best performing portfolios based on training data and assigns equal weights (20% each). Uses a fixed lambda parameter without validation-based optimization and saves results to `shrinkage_results.pkl`.
 
 4. **Extract Shrinkage Intensities**:
    ```
@@ -46,33 +46,39 @@ The complete workflow consists of the following steps:
 
 5. **Extract Optimal Weights**:
    ```
-   python extract_weights.py
+   python Step_4_extract_weights.py
    ```
-   Extracts the optimal weights for filtered timing portfolios from shrinkage results and saves them to `unrotated_optimal_weights.xlsx` for further analysis.
+   Extracts the optimal weights for top 5 timing portfolios from shrinkage results and saves them to `unrotated_optimal_weights.xlsx` for further analysis.
 
 6. **Process Factor Rotation**:
    ```
-   python factor_rotation.py [options]
+   python Step_5_factor_rotation.py [options]
    ```
-   Rotates portfolio weights into factor weights, properly preserving CS and TS factor designations, saving to `rotated_optimal_weights.xlsx`.
+   Rotates portfolio weights from the top 5 portfolios into factor weights, properly preserving CS and TS factor designations, saving to `rotated_optimal_weights.xlsx`.
 
 7. **Run Complete Test Pipeline**:
    ```
-   python run_factor_timing_test.py [options]
+   python Step_6_Prep_Output.py [options]
    ```
    Executes the full pipeline end-to-end, calculating comprehensive performance metrics, saving detailed results to `test_results.pkl` and `factor_timing_results.xlsx`. Can use existing shrinkage results without rerunning optimization.
 
 8. **Generate Plots**:
    ```
-   python plot_factor_results.py [options]
+   python Step_7_plot_results.py [options]
    ```
    Creates visualizations from test results without rerunning the entire pipeline, including lambda evolution, Sharpe ratios, cumulative returns, drawdowns, and factor weights.
 
 9. **Analyze Factor Weights**:
    ```
-   python analyze_weights.py
+   python Step_8_analyze_weights.py
    ```
-   Provides in-depth analysis of factor weights, including CS vs TS distribution and comparative performance.
+   Provides in-depth analysis of factor weights from the top 5 portfolios, including CS vs TS distribution and comparative performance.
+   
+10. **Analyze Conditioning Variables**:
+   ```
+   python Step_10_analyze_conditioning_variables.py
+   ```
+   Analyzes which conditioning variables were most important at different points in time by examining the unrotated optimal weights from the top 5 portfolios.
 
 ## Command-Line Interface
 
@@ -133,7 +139,7 @@ Additionally, `run_factor_timing_test.py` supports these parameters:
 ## Output Files
 
 - **prepared_data.pkl**: Preprocessed factor timing data with standardized conditioning variables
-- **rolling_windows.pkl**: Rolling window splits for time series analysis (train/validation/test)
+- **rolling_windows.pkl**: Rolling window splits for time series analysis (train/test)
 - **shrinkage_results.pkl**: Results from shrinkage optimization, including optimal lambda values
 - **factor_weights.pkl**: Factor weights data with proper CS/TS designations
 - **test_results.pkl**: Complete test results and performance metrics
@@ -344,29 +350,29 @@ This loads the raw factor and conditioning variable data and prepares factor tim
 ```
 python factor_timing_rolling_windows.py
 ```
-This creates rolling windows for training, validation, and testing periods.
+This creates rolling windows for training and testing periods (without validation).
 
 ### 3. Run Shrinkage Optimization for All Windows
 ```
-python factor_timing_shrinkage.py --max_windows 0
+python Step_3_shrinkage_TOP5.py --max_windows 0
 ```
 The `--max_windows 0` parameter processes all available windows. This is the most time-consuming step.
 
 ### 4. Extract Portfolio Weights
 ```
-python extract_weights.py
+python Step_4_extract_weights.py
 ```
 This extracts the optimal weights from the shrinkage results.
 
 ### 5. Perform Factor Rotation
 ```
-python factor_rotation.py
+python Step_5_factor_rotation.py
 ```
 This rotates portfolio weights into factor weights.
 
 ### 6. Generate Performance Metrics and Visualizations
 ```
-python run_factor_timing_test.py --max_windows 0
+python Step_6_Prep_Output.py --max_windows 0
 ```
 This processes all windows and generates performance metrics. The script will automatically use the existing shrinkage results without rerunning the optimization.
 
@@ -377,9 +383,21 @@ python run_factor_timing_test.py --max_windows 0 --run_shrinkage
 
 ### 7. Generate Additional Visualizations
 ```
-python plot_factor_results.py
+python Step_7_plot_results.py
 ```
 This creates additional visualizations from the test results.
+
+### 8. Analyze Weights
+```
+python Step_8_analyze_weights.py
+```
+This analyzes the weights from the top 5 portfolios.
+
+### 10. Analyze Conditioning Variables
+```
+python Step_10_analyze_conditioning_variables.py
+```
+This analyzes the importance of conditioning variables in the top 5 portfolios.
 
 ## Recent Modifications
 
