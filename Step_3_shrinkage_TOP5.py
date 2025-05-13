@@ -7,12 +7,12 @@
 #
 # OUTPUT FILES:
 # - shrinkage_results.pkl: Dictionary containing:
-#   - portfolio_weights: Weights for top 3 portfolios proportional to their returns
+#   - portfolio_weights: Weights for top 3 portfolios with equal weighting
 #   - performance_metrics: Out-of-sample performance results
 #
 # This script implements a simplified factor timing methodology:
 # 1. Selects the top 3 best performing portfolios based on training data
-# 2. Assigns weights proportional to their mean returns (higher return = higher weight)
+# 2. Assigns equal weights to the selected portfolios
 # 3. Evaluates performance directly on the test window (no validation)
 #
 # Author: Claude
@@ -128,7 +128,7 @@ def select_top_portfolios(returns, n=3):
 
 def return_weighted_portfolios(returns, all_portfolio_names, mean_returns=None):
     """
-    Assign weights to selected portfolios proportional to their returns, zeros to all others
+    Assign equal weights to selected portfolios, zeros to all others
     
     Parameters:
     -----------
@@ -137,51 +137,34 @@ def return_weighted_portfolios(returns, all_portfolio_names, mean_returns=None):
     all_portfolio_names : Index or array-like
         Names of all portfolios in the original dataset
     mean_returns : Series, optional
-        Mean returns for all portfolios. If None, will be calculated from returns.
+        Mean returns for all portfolios (not used for equal weighting, but kept for interface compatibility)
         
     Returns:
     --------
     weights : ndarray
-        Weights for all portfolios (proportional to returns for selected portfolios, 0 for others)
+        Weights for all portfolios (equal for selected portfolios, 0 for others)
     """
     selected_portfolios = returns.columns
     
-    # If mean_returns is not provided, calculate it from the returns DataFrame
-    if mean_returns is None:
-        mean_returns = returns.mean()
+    # Calculate equal weights for selected portfolios
+    num_selected = len(selected_portfolios)
+    equal_weight = 1.0 / num_selected
     
-    # Get mean returns for selected portfolios only
-    selected_returns = mean_returns[selected_portfolios]
-    
-    # If any returns are negative, shift them to be positive for weighting
-    if selected_returns.min() <= 0:
-        # Add the absolute value of the minimum plus a small buffer
-        shift_amount = 0
-        if selected_returns.min() < 0:
-            shift_amount = abs(selected_returns.min()) + 0.0001
-        selected_returns = selected_returns + shift_amount
-    
-    # Calculate weights proportional to returns
-    selected_weights = selected_returns / selected_returns.sum()
-    
-    print(f"Assigning return-proportional weights to {len(selected_portfolios)} selected portfolios out of {len(all_portfolio_names)} total portfolios")
+    print(f"Assigning equal weights ({equal_weight:.4f}) to {num_selected} selected portfolios out of {len(all_portfolio_names)} total portfolios")
     
     # Create a weights array with zeros for all portfolios
     weights = np.zeros(len(all_portfolio_names))
     
-    # Get the indices of the selected portfolios in the all_portfolio_names array
+    # Set equal weights for the selected portfolios
     for i, portfolio in enumerate(all_portfolio_names):
         if portfolio in selected_portfolios:
-            # Find the index in selected_portfolios
-            selected_idx = selected_portfolios.get_loc(portfolio)
-            # Assign proportional weight to this selected portfolio
-            weights[i] = selected_weights.iloc[selected_idx]
+            weights[i] = equal_weight
     
     # Verify that weights sum to 1.0
     weight_sum = np.sum(weights)
     print(f"Sum of all weights: {weight_sum:.4f}")
     print(f"Number of non-zero weights: {np.count_nonzero(weights)}")
-    print(f"Portfolio weights: {dict(zip(selected_portfolios, selected_weights))}")
+    print(f"Portfolio weights: {dict(zip(selected_portfolios, [equal_weight] * num_selected))}")
     
     return weights
 
@@ -437,7 +420,7 @@ def optimize_lambda(training_window, lambda_grid=None):
 
 def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfolios=3):
     """
-    Run the factor timing optimization for specified windows using top portfolios with return-weighted weights
+    Run the factor timing optimization for specified windows using top portfolios with equal weights
     
     Parameters:
     -----------
@@ -453,7 +436,7 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
     results : dict
         Results of optimization
     """
-    print(f"Running top {max_portfolios} return-weighted portfolio selection...")
+    print(f"Running top {max_portfolios} equal-weighted portfolio selection...")
     start_time = time.time()
     
     total_windows = len(rolling_data['training_windows'])
@@ -462,7 +445,7 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         window_indices = list(range(total_windows))
     
     print(f"Processing {len(window_indices)} windows...")
-    print(f"Using top {max_portfolios} portfolios with weights proportional to returns")
+    print(f"Using top {max_portfolios} portfolios with equal weights")
     
     # Initialize results
     results = {
@@ -513,8 +496,8 @@ def run_factor_timing_optimization(rolling_data, window_indices=None, max_portfo
         # Store selected portfolio columns
         results['selected_portfolios'][i] = selected_columns
         
-        # Assign weights proportional to returns for the top portfolios, zeros to all others
-        weights = return_weighted_portfolios(training_window, all_portfolio_names, mean_returns)
+        # Assign equal weights to the top portfolios, zeros to all others
+        weights = return_weighted_portfolios(training_window, all_portfolio_names)
         results['portfolio_weights'][i] = weights
         
         # Add dummy lambda value (0.0) since we're not using regularization
@@ -644,7 +627,7 @@ def save_results(results, file_path=SHRINKAGE_RESULTS_FILE):
 
 def parse_arguments():
     """Parse command-line arguments"""
-    parser = add_common_args('Run top 3 return-weighted portfolio selection')
+    parser = add_common_args('Run top 3 equal-weighted portfolio selection')
     
     # Additional script-specific arguments
     parser.add_argument('--output_file', type=str, default=SHRINKAGE_RESULTS_FILE,
@@ -674,7 +657,7 @@ def find_window_by_year(window_dates, target_year=2010):
     return closest_idx
 
 def main():
-    """Main function to run top 3 return-weighted portfolio selection"""
+    """Main function to run top 3 equal-weighted portfolio selection"""
     args = parse_arguments()
     
     # Load rolling windows data
@@ -688,9 +671,9 @@ def main():
         print("No windows to process. Exiting.")
         return
     
-    print(f"Processing {len(window_indices)} windows using top 3 return-weighted portfolios...")
+    print(f"Processing {len(window_indices)} windows using top 3 equal-weighted portfolios...")
     
-    # Process top 3 return-weighted portfolio selection
+    # Process top 3 equal-weighted portfolio selection
     results = run_factor_timing_optimization(
         rolling_data,
         window_indices=window_indices,
@@ -702,7 +685,7 @@ def main():
     with open(args.output_file, 'wb') as f:
         pickle.dump(results, f)
     
-    print("Top 3 return-weighted portfolio selection completed successfully.")
+    print("Top 3 equal-weighted portfolio selection completed successfully.")
 
 if __name__ == "__main__":
     main()
