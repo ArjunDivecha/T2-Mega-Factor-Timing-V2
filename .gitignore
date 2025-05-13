@@ -55,3 +55,5 @@ ENV/
 # OS specific
 .DS_Store
 Thumbs.db
+# SpecStory explanation file
+.specstory/.what-is-this.md
