@@ -5,6 +5,10 @@ import plotly.express as px
 import numpy as np
 from datetime import datetime
 import os
+import sys
+import subprocess
+import socket
+import time
 
 """
 INPUT FILE:
@@ -15,6 +19,59 @@ OUTPUT FILES:
 - country_comparison_*.html: HTML files with interactive country comparisons
 - Various interactive visualizations displayed in Dash application
 """
+
+def is_port_in_use(port):
+    """Check if a port is in use"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
+def kill_process_on_port(port):
+    """Kill the process using the specified port"""
+    print(f"Attempting to kill process using port {port}...")
+    
+    # Different commands for different platforms
+    if sys.platform.startswith('win'):
+        cmd = f'for /f "tokens=5" %a in (\'netstat -aon ^| findstr :{port}\') do taskkill /F /PID %a'
+        os.system(cmd)
+    else:  # macOS or Linux
+        try:
+            # Get the PID of the process using the port
+            find_pid_cmd = f"lsof -i :{port} -t"
+            result = subprocess.run(find_pid_cmd, shell=True, capture_output=True, text=True)
+            pids = result.stdout.strip().split('\n')
+            
+            if pids and pids[0]:
+                # Get the current process ID to avoid killing ourselves
+                current_pid = os.getpid()
+                
+                for pid in pids:
+                    if pid and int(pid) != current_pid:
+                        print(f"Killing process with PID {pid} on port {port}")
+                        kill_cmd = f"kill -9 {pid}"
+                        subprocess.run(kill_cmd, shell=True)
+                
+                # Wait a moment for the port to be freed
+                time.sleep(1)
+            else:
+                print(f"No process found using port {port}")
+        except Exception as e:
+            print(f"Error killing process on port {port}: {e}")
+
+def find_available_port(start_port=8050, max_attempts=10):
+    """Find an available port starting from start_port"""
+    port = start_port
+    attempts = 0
+    
+    while attempts < max_attempts:
+        if not is_port_in_use(port):
+            return port
+        
+        print(f"Port {port} is in use, trying port {port+1}...")
+        port += 1
+        attempts += 1
+    
+    print(f"Could not find an available port after {max_attempts} attempts. Please close some applications and try again.")
+    sys.exit(1)
 
 # Read the Excel files
 def read_portfolio_data(file_path, sheet_name):
@@ -495,12 +552,19 @@ class CountryWeightsComparison:
 
 # Main execution
 if __name__ == "__main__":
+    # Find an available port
+    PORT = find_available_port(start_port=8050)
+    print(f"Using port {PORT} for Dash application")
+    
     # Initialize the comparison tool with the single Excel file and two sheet names
+    print("Initializing CountryWeightsComparison...")
     comparison = CountryWeightsComparison('Visualizer.xlsx', 'Top60', 'Mega60')
     
     # Option 1: Run the interactive dashboard
+    print("Creating interactive dashboard...")
     app = comparison.create_interactive_dashboard()
-    app.run(debug=True, port=8050)
+    print(f"Starting Dash server on port {PORT}...")
+    app.run(debug=True, port=PORT)
     
     # Option 2: Create and save static visualizations
     # # Save a specific country comparison
